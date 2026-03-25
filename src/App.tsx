@@ -18,6 +18,8 @@ import Customers from "@/pages/Customers";
 import Suppliers from "@/pages/Suppliers";
 import Transactions from "@/pages/Transactions";
 import Reports from "@/pages/Reports";
+import Teams from "@/pages/Teams";
+import Branches from "@/pages/Branches";
 import NotFound from "@/pages/NotFound";
 import { Loader2 } from "lucide-react";
 
@@ -61,6 +63,8 @@ const App = () => (
                       <Route path="/suppliers" element={<Suppliers />} />
                       <Route path="/transactions" element={<Transactions />} />
                       <Route path="/reports" element={<Reports />} />
+                      <Route path="/teams" element={<Teams />} />
+                      <Route path="/branches" element={<Branches />} />
                       <Route path="*" element={<NotFound />} />
                     </Routes>
                   </AppLayout>
