@@ -11,13 +11,13 @@ import { Plus, Users } from "lucide-react";
 export default function Customers() {
   const { customers, addCustomer } = useData();
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ name: "", phone: "", notes: "", creditBalance: 0 });
+  const [form, setForm] = useState({ name: "", phone: "", notes: "", credit_balance: 0 });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name.trim()) return;
-    addCustomer(form);
-    setForm({ name: "", phone: "", notes: "", creditBalance: 0 });
+    await addCustomer(form);
+    setForm({ name: "", phone: "", notes: "", credit_balance: 0 });
     setOpen(false);
   };
 
@@ -69,8 +69,8 @@ export default function Customers() {
                   <p className="font-medium text-foreground">{c.name}</p>
                   <p className="text-xs text-muted-foreground">{c.phone || "No phone"}{c.notes ? ` · ${c.notes}` : ""}</p>
                 </div>
-                {c.creditBalance > 0 && (
-                  <Badge variant="destructive">Owes KSh {c.creditBalance.toLocaleString()}</Badge>
+                {c.credit_balance > 0 && (
+                  <Badge variant="destructive">Owes KSh {c.credit_balance.toLocaleString()}</Badge>
                 )}
               </CardContent>
             </Card>

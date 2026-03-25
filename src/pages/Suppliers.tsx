@@ -12,10 +12,10 @@ export default function Suppliers() {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ name: "", phone: "", location: "", notes: "" });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name.trim()) return;
-    addSupplier(form);
+    await addSupplier(form);
     setForm({ name: "", phone: "", location: "", notes: "" });
     setOpen(false);
   };

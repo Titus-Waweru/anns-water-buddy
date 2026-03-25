@@ -12,15 +12,14 @@ export default function Reports() {
   const monthSales = sales.filter(s => isAfter(new Date(s.date), monthStart));
   const allProfit = sales.reduce((sum, s) => sum + s.profit, 0);
 
-  const todayRevenue = todaySales.reduce((sum, s) => sum + s.finalAmount, 0);
+  const todayRevenue = todaySales.reduce((sum, s) => sum + s.final_amount, 0);
   const todayProfit = todaySales.reduce((sum, s) => sum + s.profit, 0);
-  const monthRevenue = monthSales.reduce((sum, s) => sum + s.finalAmount, 0);
+  const monthRevenue = monthSales.reduce((sum, s) => sum + s.final_amount, 0);
   const monthProfit = monthSales.reduce((sum, s) => sum + s.profit, 0);
 
-  // Payment mode breakdown
   const paymentTotals = { Cash: 0, Mpesa: 0, Credit: 0 };
-  sales.forEach(s => { paymentTotals[s.paymentMode] += s.finalAmount; });
-  purchases.forEach(p => { paymentTotals[p.paymentMode] += p.totalCost; });
+  sales.forEach(s => { paymentTotals[s.payment_mode] += s.final_amount; });
+  purchases.forEach(p => { paymentTotals[p.payment_mode] += p.total_cost; });
 
   return (
     <div className="space-y-6">
@@ -66,7 +65,6 @@ export default function Reports() {
         </Card>
       </div>
 
-      {/* Inventory Summary */}
       <Card>
         <CardHeader className="pb-2"><CardTitle className="text-sm">Inventory Levels</CardTitle></CardHeader>
         <CardContent>
@@ -75,12 +73,12 @@ export default function Reports() {
           ) : (
             <div className="space-y-3">
               {products.map(p => {
-                const pct = p.lowStockThreshold > 0 ? Math.min(100, (p.quantity / (p.lowStockThreshold * 5)) * 100) : 50;
-                const isLow = p.quantity <= p.lowStockThreshold;
+                const pct = p.low_stock_threshold > 0 ? Math.min(100, (p.quantity / (p.low_stock_threshold * 5)) * 100) : 50;
+                const isLow = p.quantity <= p.low_stock_threshold;
                 return (
                   <div key={p.id}>
                     <div className="flex justify-between text-sm mb-1">
-                      <span className="font-medium">{p.name} ({p.bottleSize})</span>
+                      <span className="font-medium">{p.name} ({p.bottle_size})</span>
                       <span className={isLow ? "text-destructive font-bold" : "text-foreground"}>{p.quantity} units</span>
                     </div>
                     <div className="h-2 bg-muted rounded-full overflow-hidden">
