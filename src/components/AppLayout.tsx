@@ -7,21 +7,24 @@ import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import logo from "@/assets/logo.jpg";
 
-const navItems = [
-  { title: "Dashboard", path: "/app", icon: LayoutDashboard },
-  { title: "Inventory", path: "/app/inventory", icon: Package },
-  { title: "Sales", path: "/app/sales", icon: ShoppingCart },
-  { title: "Purchases", path: "/app/purchases", icon: Truck },
-  { title: "Customers", path: "/app/customers", icon: Users },
-  { title: "Suppliers", path: "/app/suppliers", icon: Building },
-  { title: "Transactions", path: "/app/transactions", icon: FileText },
-  { title: "Reports", path: "/app/reports", icon: BarChart3 },
+const allNavItems = [
+  { title: "Dashboard", path: "/app", icon: LayoutDashboard, adminOnly: false },
+  { title: "Inventory", path: "/app/inventory", icon: Package, adminOnly: false },
+  { title: "Sales", path: "/app/sales", icon: ShoppingCart, adminOnly: false },
+  { title: "Purchases", path: "/app/purchases", icon: Truck, adminOnly: false },
+  { title: "Customers", path: "/app/customers", icon: Users, adminOnly: false },
+  { title: "Suppliers", path: "/app/suppliers", icon: Building, adminOnly: false },
+  { title: "Transactions", path: "/app/transactions", icon: FileText, adminOnly: false },
+  { title: "Reports", path: "/app/reports", icon: BarChart3, adminOnly: false },
+  { title: "Teams", path: "/app/teams", icon: Users, adminOnly: true },
+  { title: "Branches", path: "/app/branches", icon: Building, adminOnly: true },
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { profile, signOut } = useAuth();
+  const { profile, signOut, isAdmin } = useAuth();
+  const navItems = allNavItems.filter(item => !item.adminOnly || isAdmin);
 
   return (
     <div className="min-h-screen flex">
