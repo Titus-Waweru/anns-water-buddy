@@ -9,7 +9,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Badge } from "@/components/ui/badge";
 import { Plus, Truck } from "lucide-react";
 import { format } from "date-fns";
-import type { PaymentMode } from "@/types";
+
+type PaymentMode = "Cash" | "Mpesa" | "Credit";
 
 export default function Purchases() {
   const { products, suppliers, purchases, addPurchase } = useData();
@@ -26,18 +27,18 @@ export default function Purchases() {
   const selectedSupplier = suppliers.find(s => s.id === form.supplierId);
   const totalCost = form.quantity * form.buyingPrice;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedProduct || !form.supplierId || form.quantity < 1) return;
-    addPurchase({
-      supplierId: form.supplierId,
-      supplierName: selectedSupplier?.name || "",
-      productId: form.productId,
-      productName: selectedProduct.name,
+    await addPurchase({
+      supplier_id: form.supplierId,
+      supplier_name: selectedSupplier?.name || "",
+      product_id: form.productId,
+      product_name: selectedProduct.name,
       quantity: form.quantity,
-      buyingPrice: form.buyingPrice,
-      totalCost,
-      paymentMode: form.paymentMode,
+      buying_price: form.buyingPrice,
+      total_cost: totalCost,
+      payment_mode: form.paymentMode,
       date: new Date().toISOString(),
     });
     setForm({ supplierId: "", productId: "", quantity: 1, buyingPrice: 0, paymentMode: "Cash" });
@@ -71,11 +72,11 @@ export default function Purchases() {
                 <Label>Product *</Label>
                 <Select value={form.productId} onValueChange={v => {
                   const p = products.find(x => x.id === v);
-                  setForm({ ...form, productId: v, buyingPrice: p?.buyingPrice || 0 });
+                  setForm({ ...form, productId: v, buyingPrice: p?.buying_price || 0 });
                 }}>
                   <SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger>
                   <SelectContent>
-                    {products.map(p => <SelectItem key={p.id} value={p.id}>{p.name} ({p.bottleSize})</SelectItem>)}
+                    {products.map(p => <SelectItem key={p.id} value={p.id}>{p.name} ({p.bottle_size})</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -120,16 +121,16 @@ export default function Purchases() {
         </Card>
       ) : (
         <div className="space-y-3">
-          {[...purchases].reverse().map(p => (
+          {purchases.map(p => (
             <Card key={p.id}>
               <CardContent className="p-4 flex items-center justify-between">
                 <div>
-                  <p className="font-medium text-foreground">{p.productName} × {p.quantity}</p>
-                  <p className="text-xs text-muted-foreground">{p.supplierName} · {format(new Date(p.date), "dd MMM yyyy, HH:mm")}</p>
+                  <p className="font-medium text-foreground">{p.product_name} × {p.quantity}</p>
+                  <p className="text-xs text-muted-foreground">{p.supplier_name} · {format(new Date(p.date), "dd MMM yyyy, HH:mm")}</p>
                 </div>
                 <div className="text-right">
-                  <p className="font-bold text-foreground">KSh {p.totalCost.toLocaleString()}</p>
-                  <Badge variant="outline" className="text-[10px]">{p.paymentMode}</Badge>
+                  <p className="font-bold text-foreground">KSh {p.total_cost.toLocaleString()}</p>
+                  <Badge variant="outline" className="text-[10px]">{p.payment_mode}</Badge>
                 </div>
               </CardContent>
             </Card>

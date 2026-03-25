@@ -9,7 +9,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Badge } from "@/components/ui/badge";
 import { Plus, ShoppingCart } from "lucide-react";
 import { format } from "date-fns";
-import type { PaymentMode, DiscountType } from "@/types";
+
+type PaymentMode = "Cash" | "Mpesa" | "Credit";
+type DiscountType = "percentage" | "fixed";
 
 export default function Sales() {
   const { products, customers, sales, addSale } = useData();
@@ -26,33 +28,33 @@ export default function Sales() {
   const selectedProduct = products.find(p => p.id === form.productId);
   const selectedCustomer = customers.find(c => c.id === form.customerId);
 
-  const subtotal = selectedProduct ? selectedProduct.sellingPrice * form.quantity : 0;
+  const subtotal = selectedProduct ? selectedProduct.selling_price * form.quantity : 0;
   const discountAmount = form.discountType === "percentage"
     ? subtotal * (form.discountValue / 100)
     : form.discountValue;
   const finalAmount = Math.max(0, subtotal - discountAmount);
   const profit = selectedProduct
-    ? (selectedProduct.sellingPrice - selectedProduct.buyingPrice) * form.quantity - discountAmount
+    ? (selectedProduct.selling_price - selectedProduct.buying_price) * form.quantity - discountAmount
     : 0;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedProduct || form.quantity < 1) return;
-    addSale({
-      customerId: form.customerId || undefined,
-      customerName: selectedCustomer?.name || "Walk-in",
-      productId: form.productId,
-      productName: selectedProduct.name,
+    await addSale({
+      customer_id: form.customerId || null,
+      customer_name: selectedCustomer?.name || "Walk-in",
+      product_id: form.productId,
+      product_name: selectedProduct.name,
       quantity: form.quantity,
-      sellingPrice: selectedProduct.sellingPrice,
-      buyingPrice: selectedProduct.buyingPrice,
-      discountType: form.discountType,
-      discountValue: form.discountValue,
-      totalAmount: subtotal,
-      discountAmount,
-      finalAmount,
+      selling_price: selectedProduct.selling_price,
+      buying_price: selectedProduct.buying_price,
+      discount_type: form.discountType,
+      discount_value: form.discountValue,
+      total_amount: subtotal,
+      discount_amount: discountAmount,
+      final_amount: finalAmount,
       profit,
-      paymentMode: form.paymentMode,
+      payment_mode: form.paymentMode,
       date: new Date().toISOString(),
     });
     setForm({ customerId: "", productId: "", quantity: 1, discountType: "fixed", discountValue: 0, paymentMode: "Cash" });
@@ -90,7 +92,7 @@ export default function Sales() {
                   <SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger>
                   <SelectContent>
                     {products.map(p => (
-                      <SelectItem key={p.id} value={p.id}>{p.name} ({p.bottleSize}) — {p.quantity} in stock</SelectItem>
+                      <SelectItem key={p.id} value={p.id}>{p.name} ({p.bottle_size}) — {p.quantity} in stock</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -155,18 +157,18 @@ export default function Sales() {
         </Card>
       ) : (
         <div className="space-y-3">
-          {[...sales].reverse().map(s => (
+          {sales.map(s => (
             <Card key={s.id}>
               <CardContent className="p-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="font-medium text-foreground">{s.productName} × {s.quantity}</p>
-                    <p className="text-xs text-muted-foreground">{s.customerName || "Walk-in"} · {format(new Date(s.date), "dd MMM yyyy, HH:mm")}</p>
+                    <p className="font-medium text-foreground">{s.product_name} × {s.quantity}</p>
+                    <p className="text-xs text-muted-foreground">{s.customer_name || "Walk-in"} · {format(new Date(s.date), "dd MMM yyyy, HH:mm")}</p>
                   </div>
                   <div className="text-right">
-                    <p className="font-bold text-foreground">KSh {s.finalAmount.toLocaleString()}</p>
+                    <p className="font-bold text-foreground">KSh {s.final_amount.toLocaleString()}</p>
                     <div className="flex gap-1 justify-end">
-                      <Badge variant="outline" className="text-[10px]">{s.paymentMode}</Badge>
+                      <Badge variant="outline" className="text-[10px]">{s.payment_mode}</Badge>
                       <Badge className="text-[10px] bg-success">+KSh {s.profit.toLocaleString()}</Badge>
                     </div>
                   </div>

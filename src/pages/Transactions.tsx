@@ -18,8 +18,8 @@ export default function Transactions() {
   type Transaction = { id: string; type: "Sale" | "Purchase"; productName: string; quantity: number; amount: number; profit?: number; person: string; paymentMode: string; date: string };
 
   const all: Transaction[] = [
-    ...sales.map(s => ({ id: s.id, type: "Sale" as const, productName: s.productName, quantity: s.quantity, amount: s.finalAmount, profit: s.profit, person: s.customerName || "Walk-in", paymentMode: s.paymentMode, date: s.date })),
-    ...purchases.map(p => ({ id: p.id, type: "Purchase" as const, productName: p.productName, quantity: p.quantity, amount: p.totalCost, person: p.supplierName, paymentMode: p.paymentMode, date: p.date })),
+    ...sales.map(s => ({ id: s.id, type: "Sale" as const, productName: s.product_name, quantity: s.quantity, amount: s.final_amount, profit: s.profit, person: s.customer_name || "Walk-in", paymentMode: s.payment_mode, date: s.date })),
+    ...purchases.map(p => ({ id: p.id, type: "Purchase" as const, productName: p.product_name, quantity: p.quantity, amount: p.total_cost, person: p.supplier_name, paymentMode: p.payment_mode, date: p.date })),
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   const filtered = all.filter(t => {

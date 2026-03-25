@@ -1,45 +1,40 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
-import type { Product, Customer, Supplier, Sale, Purchase, InventoryLog } from "@/types";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/context/AuthContext";
+import type { Database } from "@/integrations/supabase/types";
 
-function generateId() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-}
-
-function loadFromStorage<T>(key: string, fallback: T): T {
-  try {
-    const data = localStorage.getItem(key);
-    return data ? JSON.parse(data) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function saveToStorage<T>(key: string, data: T) {
-  localStorage.setItem(key, JSON.stringify(data));
-}
+type DbProduct = Database["public"]["Tables"]["products"]["Row"];
+type DbCustomer = Database["public"]["Tables"]["customers"]["Row"];
+type DbSupplier = Database["public"]["Tables"]["suppliers"]["Row"];
+type DbSale = Database["public"]["Tables"]["sales"]["Row"];
+type DbPurchase = Database["public"]["Tables"]["purchases"]["Row"];
+type DbInventoryLog = Database["public"]["Tables"]["inventory_logs"]["Row"];
 
 interface DataContextType {
-  products: Product[];
-  customers: Customer[];
-  suppliers: Supplier[];
-  sales: Sale[];
-  purchases: Purchase[];
-  inventoryLogs: InventoryLog[];
+  products: DbProduct[];
+  customers: DbCustomer[];
+  suppliers: DbSupplier[];
+  sales: DbSale[];
+  purchases: DbPurchase[];
+  inventoryLogs: DbInventoryLog[];
+  loading: boolean;
 
-  addProduct: (p: Omit<Product, "id" | "createdAt">) => void;
-  updateProduct: (p: Product) => void;
-  deleteProduct: (id: string) => void;
+  addProduct: (p: Database["public"]["Tables"]["products"]["Insert"]) => Promise<void>;
+  updateProduct: (p: Database["public"]["Tables"]["products"]["Update"] & { id: string }) => Promise<void>;
+  deleteProduct: (id: string) => Promise<void>;
 
-  addCustomer: (c: Omit<Customer, "id" | "createdAt">) => void;
-  updateCustomer: (c: Customer) => void;
-  deleteCustomer: (id: string) => void;
+  addCustomer: (c: Database["public"]["Tables"]["customers"]["Insert"]) => Promise<void>;
+  updateCustomer: (c: Database["public"]["Tables"]["customers"]["Update"] & { id: string }) => Promise<void>;
+  deleteCustomer: (id: string) => Promise<void>;
 
-  addSupplier: (s: Omit<Supplier, "id" | "createdAt">) => void;
-  updateSupplier: (s: Supplier) => void;
-  deleteSupplier: (id: string) => void;
+  addSupplier: (s: Database["public"]["Tables"]["suppliers"]["Insert"]) => Promise<void>;
+  updateSupplier: (s: Database["public"]["Tables"]["suppliers"]["Update"] & { id: string }) => Promise<void>;
+  deleteSupplier: (id: string) => Promise<void>;
 
-  addSale: (s: Omit<Sale, "id">) => void;
-  addPurchase: (p: Omit<Purchase, "id">) => void;
+  addSale: (s: Database["public"]["Tables"]["sales"]["Insert"]) => Promise<void>;
+  addPurchase: (p: Database["public"]["Tables"]["purchases"]["Insert"]) => Promise<void>;
+
+  refetch: () => void;
 }
 
 const DataContext = createContext<DataContextType | null>(null);
@@ -51,112 +46,151 @@ export function useData() {
 }
 
 export function DataProvider({ children }: { children: React.ReactNode }) {
-  const [products, setProducts] = useState<Product[]>(() => loadFromStorage("wbm_products", []));
-  const [customers, setCustomers] = useState<Customer[]>(() => loadFromStorage("wbm_customers", []));
-  const [suppliers, setSuppliers] = useState<Supplier[]>(() => loadFromStorage("wbm_suppliers", []));
-  const [sales, setSales] = useState<Sale[]>(() => loadFromStorage("wbm_sales", []));
-  const [purchases, setPurchases] = useState<Purchase[]>(() => loadFromStorage("wbm_purchases", []));
-  const [inventoryLogs, setInventoryLogs] = useState<InventoryLog[]>(() => loadFromStorage("wbm_inventory_logs", []));
+  const { user } = useAuth();
+  const [products, setProducts] = useState<DbProduct[]>([]);
+  const [customers, setCustomers] = useState<DbCustomer[]>([]);
+  const [suppliers, setSuppliers] = useState<DbSupplier[]>([]);
+  const [sales, setSales] = useState<DbSale[]>([]);
+  const [purchases, setPurchases] = useState<DbPurchase[]>([]);
+  const [inventoryLogs, setInventoryLogs] = useState<DbInventoryLog[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => saveToStorage("wbm_products", products), [products]);
-  useEffect(() => saveToStorage("wbm_customers", customers), [customers]);
-  useEffect(() => saveToStorage("wbm_suppliers", suppliers), [suppliers]);
-  useEffect(() => saveToStorage("wbm_sales", sales), [sales]);
-  useEffect(() => saveToStorage("wbm_purchases", purchases), [purchases]);
-  useEffect(() => saveToStorage("wbm_inventory_logs", inventoryLogs), [inventoryLogs]);
+  const fetchAll = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    const [prodRes, custRes, suppRes, saleRes, purchRes, logRes] = await Promise.all([
+      supabase.from("products").select("*").order("created_at", { ascending: false }),
+      supabase.from("customers").select("*").order("created_at", { ascending: false }),
+      supabase.from("suppliers").select("*").order("created_at", { ascending: false }),
+      supabase.from("sales").select("*").order("date", { ascending: false }),
+      supabase.from("purchases").select("*").order("date", { ascending: false }),
+      supabase.from("inventory_logs").select("*").order("date", { ascending: false }),
+    ]);
+    if (prodRes.data) setProducts(prodRes.data);
+    if (custRes.data) setCustomers(custRes.data);
+    if (suppRes.data) setSuppliers(suppRes.data);
+    if (saleRes.data) setSales(saleRes.data);
+    if (purchRes.data) setPurchases(purchRes.data);
+    if (logRes.data) setInventoryLogs(logRes.data);
+    setLoading(false);
+  }, [user]);
 
-  const addProduct = useCallback((p: Omit<Product, "id" | "createdAt">) => {
-    setProducts(prev => [...prev, { ...p, id: generateId(), createdAt: new Date().toISOString() }]);
-  }, []);
+  useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  const updateProduct = useCallback((p: Product) => {
-    setProducts(prev => prev.map(x => x.id === p.id ? p : x));
-  }, []);
+  const addProduct = useCallback(async (p: Database["public"]["Tables"]["products"]["Insert"]) => {
+    const { error } = await supabase.from("products").insert(p);
+    if (!error) fetchAll();
+  }, [fetchAll]);
 
-  const deleteProduct = useCallback((id: string) => {
-    setProducts(prev => prev.filter(x => x.id !== id));
-  }, []);
+  const updateProduct = useCallback(async (p: Database["public"]["Tables"]["products"]["Update"] & { id: string }) => {
+    const { id, ...rest } = p;
+    await supabase.from("products").update(rest).eq("id", id);
+    fetchAll();
+  }, [fetchAll]);
 
-  const addCustomer = useCallback((c: Omit<Customer, "id" | "createdAt">) => {
-    setCustomers(prev => [...prev, { ...c, id: generateId(), createdAt: new Date().toISOString() }]);
-  }, []);
+  const deleteProduct = useCallback(async (id: string) => {
+    await supabase.from("products").delete().eq("id", id);
+    fetchAll();
+  }, [fetchAll]);
 
-  const updateCustomer = useCallback((c: Customer) => {
-    setCustomers(prev => prev.map(x => x.id === c.id ? c : x));
-  }, []);
+  const addCustomer = useCallback(async (c: Database["public"]["Tables"]["customers"]["Insert"]) => {
+    await supabase.from("customers").insert(c);
+    fetchAll();
+  }, [fetchAll]);
 
-  const deleteCustomer = useCallback((id: string) => {
-    setCustomers(prev => prev.filter(x => x.id !== id));
-  }, []);
+  const updateCustomer = useCallback(async (c: Database["public"]["Tables"]["customers"]["Update"] & { id: string }) => {
+    const { id, ...rest } = c;
+    await supabase.from("customers").update(rest).eq("id", id);
+    fetchAll();
+  }, [fetchAll]);
 
-  const addSupplier = useCallback((s: Omit<Supplier, "id" | "createdAt">) => {
-    setSuppliers(prev => [...prev, { ...s, id: generateId(), createdAt: new Date().toISOString() }]);
-  }, []);
+  const deleteCustomer = useCallback(async (id: string) => {
+    await supabase.from("customers").delete().eq("id", id);
+    fetchAll();
+  }, [fetchAll]);
 
-  const updateSupplier = useCallback((s: Supplier) => {
-    setSuppliers(prev => prev.map(x => x.id === s.id ? s : x));
-  }, []);
+  const addSupplier = useCallback(async (s: Database["public"]["Tables"]["suppliers"]["Insert"]) => {
+    await supabase.from("suppliers").insert(s);
+    fetchAll();
+  }, [fetchAll]);
 
-  const deleteSupplier = useCallback((id: string) => {
-    setSuppliers(prev => prev.filter(x => x.id !== id));
-  }, []);
+  const updateSupplier = useCallback(async (s: Database["public"]["Tables"]["suppliers"]["Update"] & { id: string }) => {
+    const { id, ...rest } = s;
+    await supabase.from("suppliers").update(rest).eq("id", id);
+    fetchAll();
+  }, [fetchAll]);
 
-  const addSale = useCallback((s: Omit<Sale, "id">) => {
-    const sale: Sale = { ...s, id: generateId() };
-    setSales(prev => [...prev, sale]);
+  const deleteSupplier = useCallback(async (id: string) => {
+    await supabase.from("suppliers").delete().eq("id", id);
+    fetchAll();
+  }, [fetchAll]);
+
+  const addSale = useCallback(async (s: Database["public"]["Tables"]["sales"]["Insert"]) => {
+    const { data: saleData, error: saleErr } = await supabase.from("sales").insert(s).select().single();
+    if (saleErr || !saleData) return;
 
     // Reduce inventory
-    setProducts(prev => prev.map(p =>
-      p.id === s.productId ? { ...p, quantity: Math.max(0, p.quantity - s.quantity) } : p
-    ));
+    const product = products.find(p => p.id === s.product_id);
+    if (product) {
+      await supabase.from("products").update({ quantity: Math.max(0, product.quantity - s.quantity) }).eq("id", s.product_id);
+    }
 
     // Log
-    setInventoryLogs(prev => [...prev, {
-      id: generateId(),
-      productId: s.productId,
-      productName: s.productName,
+    await supabase.from("inventory_logs").insert({
+      product_id: s.product_id,
+      product_name: s.product_name,
       type: "OUT",
       quantity: s.quantity,
-      reference: `Sale to ${s.customerName || "Walk-in"}`,
-      date: s.date,
-    }]);
+      reference: `Sale to ${s.customer_name || "Walk-in"}`,
+      date: s.date || new Date().toISOString(),
+    });
 
-    // Update customer credit
-    if (s.paymentMode === "Credit" && s.customerId) {
-      setCustomers(prev => prev.map(c =>
-        c.id === s.customerId ? { ...c, creditBalance: c.creditBalance + s.finalAmount } : c
-      ));
+    // Update customer credit if credit sale
+    if (s.payment_mode === "Credit" && s.customer_id) {
+      const cust = customers.find(c => c.id === s.customer_id);
+      if (cust) {
+        await supabase.from("customers").update({
+          credit_balance: cust.credit_balance + s.final_amount,
+        }).eq("id", s.customer_id);
+      }
     }
-  }, []);
 
-  const addPurchase = useCallback((p: Omit<Purchase, "id">) => {
-    const purchase: Purchase = { ...p, id: generateId() };
-    setPurchases(prev => [...prev, purchase]);
+    fetchAll();
+  }, [fetchAll, products, customers]);
+
+  const addPurchase = useCallback(async (p: Database["public"]["Tables"]["purchases"]["Insert"]) => {
+    const { error } = await supabase.from("purchases").insert(p);
+    if (error) return;
 
     // Increase inventory
-    setProducts(prev => prev.map(prod =>
-      prod.id === p.productId ? { ...prod, quantity: prod.quantity + p.quantity, buyingPrice: p.buyingPrice } : prod
-    ));
+    const product = products.find(prod => prod.id === p.product_id);
+    if (product) {
+      await supabase.from("products").update({
+        quantity: product.quantity + p.quantity,
+        buying_price: p.buying_price,
+      }).eq("id", p.product_id);
+    }
 
     // Log
-    setInventoryLogs(prev => [...prev, {
-      id: generateId(),
-      productId: p.productId,
-      productName: p.productName,
+    await supabase.from("inventory_logs").insert({
+      product_id: p.product_id,
+      product_name: p.product_name,
       type: "IN",
       quantity: p.quantity,
-      reference: `Purchase from ${p.supplierName}`,
-      date: p.date,
-    }]);
-  }, []);
+      reference: `Purchase from ${p.supplier_name}`,
+      date: p.date || new Date().toISOString(),
+    });
+
+    fetchAll();
+  }, [fetchAll, products]);
 
   return (
     <DataContext.Provider value={{
-      products, customers, suppliers, sales, purchases, inventoryLogs,
+      products, customers, suppliers, sales, purchases, inventoryLogs, loading,
       addProduct, updateProduct, deleteProduct,
       addCustomer, updateCustomer, deleteCustomer,
       addSupplier, updateSupplier, deleteSupplier,
-      addSale, addPurchase,
+      addSale, addPurchase, refetch: fetchAll,
     }}>
       {children}
     </DataContext.Provider>
