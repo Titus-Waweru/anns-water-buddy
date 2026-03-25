@@ -58,7 +58,7 @@ export default function Dashboard() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs text-muted-foreground font-medium">Today's Purchases</p>
-                <p className="text-xl font-bold text-foreground">KSh {tod	ayPurchasesTotal.toLocaleString()}</p>
+                <p className="text-xl font-bold text-foreground">KSh {todayPurchasesTotal.toLocaleString()}</p>
               </div>
               <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center">
                 <ArrowDownCircle className="h-5 w-5 text-secondary" />
