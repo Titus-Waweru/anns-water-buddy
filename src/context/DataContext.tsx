@@ -46,7 +46,7 @@ export function useData() {
 }
 
 export function DataProvider({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth();
+  const { user, isAdmin, isSuperAdmin, branchId } = useAuth();
   const [products, setProducts] = useState<DbProduct[]>([]);
   const [customers, setCustomers] = useState<DbCustomer[]>([]);
   const [suppliers, setSuppliers] = useState<DbSupplier[]>([]);
@@ -58,13 +58,27 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const fetchAll = useCallback(async () => {
     if (!user) return;
     setLoading(true);
+
+    // Build branch-filtered queries - superadmin/supervisor see all, others see their branch
+    const shouldFilter = !isSuperAdmin && !isAdmin && branchId;
+
+    let prodQ = supabase.from("products").select("*").order("created_at", { ascending: false });
+    let custQ = supabase.from("customers").select("*").order("created_at", { ascending: false });
+    let suppQ = supabase.from("suppliers").select("*").order("created_at", { ascending: false });
+    let saleQ = supabase.from("sales").select("*").order("date", { ascending: false });
+    let purchQ = supabase.from("purchases").select("*").order("date", { ascending: false });
+    let logQ = supabase.from("inventory_logs").select("*").order("date", { ascending: false });
+
+    if (shouldFilter) {
+      prodQ = prodQ.eq("branch_id", branchId);
+      custQ = custQ.eq("branch_id", branchId);
+      saleQ = saleQ.eq("branch_id", branchId);
+      purchQ = purchQ.eq("branch_id", branchId);
+      logQ = logQ.eq("branch_id", branchId);
+    }
+
     const [prodRes, custRes, suppRes, saleRes, purchRes, logRes] = await Promise.all([
-      supabase.from("products").select("*").order("created_at", { ascending: false }),
-      supabase.from("customers").select("*").order("created_at", { ascending: false }),
-      supabase.from("suppliers").select("*").order("created_at", { ascending: false }),
-      supabase.from("sales").select("*").order("date", { ascending: false }),
-      supabase.from("purchases").select("*").order("date", { ascending: false }),
-      supabase.from("inventory_logs").select("*").order("date", { ascending: false }),
+      prodQ, custQ, suppQ, saleQ, purchQ, logQ,
     ]);
     if (prodRes.data) setProducts(prodRes.data);
     if (custRes.data) setCustomers(custRes.data);
@@ -73,7 +87,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     if (purchRes.data) setPurchases(purchRes.data);
     if (logRes.data) setInventoryLogs(logRes.data);
     setLoading(false);
-  }, [user]);
+  }, [user, isSuperAdmin, isAdmin, branchId]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
