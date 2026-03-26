@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { useData } from "@/context/DataContext";
+import { useAuth } from "@/context/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,15 +9,19 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Plus, ShoppingCart } from "lucide-react";
+import { Plus, ShoppingCart, Printer } from "lucide-react";
 import { format } from "date-fns";
+import { toast } from "sonner";
+import SaleReceipt from "@/components/SaleReceipt";
 
 type PaymentMode = "Cash" | "Mpesa" | "Credit";
 type DiscountType = "percentage" | "fixed";
 
 export default function Sales() {
   const { products, customers, sales, addSale } = useData();
+  const { user } = useAuth();
   const [open, setOpen] = useState(false);
+  const [receiptData, setReceiptData] = useState<any>(null);
   const [form, setForm] = useState({
     customerId: "",
     productId: "",
@@ -40,7 +46,12 @@ export default function Sales() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedProduct || form.quantity < 1) return;
-    await addSale({
+    if (form.quantity > selectedProduct.quantity) {
+      toast.error("Not enough stock available");
+      return;
+    }
+
+    const saleData = {
       customer_id: form.customerId || null,
       customer_name: selectedCustomer?.name || "Walk-in",
       product_id: form.productId,
@@ -56,7 +67,40 @@ export default function Sales() {
       profit,
       payment_mode: form.paymentMode,
       date: new Date().toISOString(),
+    };
+
+    await addSale(saleData);
+
+    // Award loyalty points (1 point per 100 KSh)
+    const loyaltyPoints = Math.floor(finalAmount / 100);
+    if (form.customerId && loyaltyPoints > 0) {
+      await supabase.from("loyalty_points").insert({
+        customer_id: form.customerId,
+        points: loyaltyPoints,
+        description: `Sale: ${selectedProduct.name} × ${form.quantity}`,
+      });
+      await supabase.from("customers").update({
+        loyalty_points: (selectedCustomer?.loyalty_points || 0) + loyaltyPoints,
+      }).eq("id", form.customerId);
+    }
+
+    // Show receipt
+    setReceiptData({
+      id: crypto.randomUUID(),
+      customerName: selectedCustomer?.name || "Walk-in",
+      productName: selectedProduct.name,
+      quantity: form.quantity,
+      sellingPrice: selectedProduct.selling_price,
+      totalAmount: subtotal,
+      discountAmount,
+      finalAmount,
+      paymentMode: form.paymentMode,
+      profit,
+      loyaltyPoints,
+      date: new Date().toISOString(),
     });
+
+    toast.success("Sale recorded successfully!");
     setForm({ customerId: "", productId: "", quantity: 1, discountType: "fixed", discountValue: 0, paymentMode: "Cash" });
     setOpen(false);
   };
@@ -148,6 +192,16 @@ export default function Sales() {
         </Dialog>
       </div>
 
+      {/* Receipt Dialog */}
+      {receiptData && (
+        <Dialog open={!!receiptData} onOpenChange={() => setReceiptData(null)}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader><DialogTitle>Sale Receipt</DialogTitle></DialogHeader>
+            <SaleReceipt data={receiptData} onClose={() => setReceiptData(null)} />
+          </DialogContent>
+        </Dialog>
+      )}
+
       {sales.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center">
@@ -165,12 +219,30 @@ export default function Sales() {
                     <p className="font-medium text-foreground">{s.product_name} × {s.quantity}</p>
                     <p className="text-xs text-muted-foreground">{s.customer_name || "Walk-in"} · {format(new Date(s.date), "dd MMM yyyy, HH:mm")}</p>
                   </div>
-                  <div className="text-right">
-                    <p className="font-bold text-foreground">KSh {s.final_amount.toLocaleString()}</p>
-                    <div className="flex gap-1 justify-end">
-                      <Badge variant="outline" className="text-[10px]">{s.payment_mode}</Badge>
-                      <Badge className="text-[10px] bg-success">+KSh {s.profit.toLocaleString()}</Badge>
+                  <div className="text-right flex items-center gap-2">
+                    <div>
+                      <p className="font-bold text-foreground">KSh {s.final_amount.toLocaleString()}</p>
+                      <div className="flex gap-1 justify-end">
+                        <Badge variant="outline" className="text-[10px]">{s.payment_mode}</Badge>
+                        <Badge className="text-[10px] bg-success">+KSh {s.profit.toLocaleString()}</Badge>
+                      </div>
                     </div>
+                    <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setReceiptData({
+                      id: s.id,
+                      customerName: s.customer_name || "Walk-in",
+                      productName: s.product_name,
+                      quantity: s.quantity,
+                      sellingPrice: s.selling_price,
+                      totalAmount: s.total_amount,
+                      discountAmount: s.discount_amount,
+                      finalAmount: s.final_amount,
+                      paymentMode: s.payment_mode,
+                      profit: s.profit,
+                      loyaltyPoints: Math.floor(s.final_amount / 100),
+                      date: s.date,
+                    })}>
+                      <Printer className="h-4 w-4" />
+                    </Button>
                   </div>
                 </div>
               </CardContent>

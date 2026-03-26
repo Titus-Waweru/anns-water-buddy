@@ -20,6 +20,9 @@ import Transactions from "@/pages/Transactions";
 import Reports from "@/pages/Reports";
 import Teams from "@/pages/Teams";
 import Branches from "@/pages/Branches";
+import CashSubmission from "@/pages/CashSubmission";
+import Assets from "@/pages/Assets";
+import Vouchers from "@/pages/Vouchers";
 import NotFound from "@/pages/NotFound";
 import { Loader2 } from "lucide-react";
 
@@ -65,6 +68,9 @@ const App = () => (
                       <Route path="/reports" element={<Reports />} />
                       <Route path="/teams" element={<Teams />} />
                       <Route path="/branches" element={<Branches />} />
+                      <Route path="/cash-submission" element={<CashSubmission />} />
+                      <Route path="/assets" element={<Assets />} />
+                      <Route path="/vouchers" element={<Vouchers />} />
                       <Route path="*" element={<NotFound />} />
                     </Routes>
                   </AppLayout>
