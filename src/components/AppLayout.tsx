@@ -2,6 +2,7 @@ import { Link, useLocation } from "react-router-dom";
 import { useState } from "react";
 import {
   LayoutDashboard, Package, ShoppingCart, Truck, Users, Building, FileText, BarChart3, Menu, X, Droplets, LogOut,
+  DollarSign, Wrench, Receipt,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,9 @@ const allNavItems = [
   { title: "Suppliers", path: "/app/suppliers", icon: Building, adminOnly: false },
   { title: "Transactions", path: "/app/transactions", icon: FileText, adminOnly: false },
   { title: "Reports", path: "/app/reports", icon: BarChart3, adminOnly: false },
+  { title: "Cash Submission", path: "/app/cash-submission", icon: DollarSign, adminOnly: false },
+  { title: "Assets", path: "/app/assets", icon: Wrench, adminOnly: true },
+  { title: "Vouchers", path: "/app/vouchers", icon: Receipt, adminOnly: true },
   { title: "Teams", path: "/app/teams", icon: Users, adminOnly: true },
   { title: "Branches", path: "/app/branches", icon: Building, adminOnly: true },
 ];
