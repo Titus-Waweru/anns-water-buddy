@@ -14,6 +14,53 @@ export type Database = {
   }
   public: {
     Tables: {
+      assets: {
+        Row: {
+          acquired_date: string | null
+          branch_id: string | null
+          category: string
+          created_at: string
+          description: string | null
+          id: string
+          name: string
+          status: string
+          updated_at: string
+          value: number
+        }
+        Insert: {
+          acquired_date?: string | null
+          branch_id?: string | null
+          category?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          name: string
+          status?: string
+          updated_at?: string
+          value?: number
+        }
+        Update: {
+          acquired_date?: string | null
+          branch_id?: string | null
+          category?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          name?: string
+          status?: string
+          updated_at?: string
+          value?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "assets_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       branches: {
         Row: {
           created_at: string
@@ -43,6 +90,65 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      cash_submissions: {
+        Row: {
+          branch_id: string | null
+          cash_amount: number
+          cashier_id: string
+          created_at: string
+          credit_amount: number
+          id: string
+          mpesa_amount: number
+          notes: string | null
+          shift_date: string
+          status: string
+          total_amount: number
+          updated_at: string
+          validated_at: string | null
+          validated_by: string | null
+        }
+        Insert: {
+          branch_id?: string | null
+          cash_amount?: number
+          cashier_id: string
+          created_at?: string
+          credit_amount?: number
+          id?: string
+          mpesa_amount?: number
+          notes?: string | null
+          shift_date?: string
+          status?: string
+          total_amount?: number
+          updated_at?: string
+          validated_at?: string | null
+          validated_by?: string | null
+        }
+        Update: {
+          branch_id?: string | null
+          cash_amount?: number
+          cashier_id?: string
+          created_at?: string
+          credit_amount?: number
+          id?: string
+          mpesa_amount?: number
+          notes?: string | null
+          shift_date?: string
+          status?: string
+          total_amount?: number
+          updated_at?: string
+          validated_at?: string | null
+          validated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cash_submissions_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       customers: {
         Row: {
@@ -192,37 +298,52 @@ export type Database = {
       }
       products: {
         Row: {
+          bales: number
           bottle_size: string
+          bottles_per_bale: number
+          bottles_per_pack: number
           branch_id: string | null
           buying_price: number
           created_at: string
+          faulty_bottles: number
           id: string
           low_stock_threshold: number
           name: string
+          packs: number
           quantity: number
           selling_price: number
           updated_at: string
         }
         Insert: {
+          bales?: number
           bottle_size: string
+          bottles_per_bale?: number
+          bottles_per_pack?: number
           branch_id?: string | null
           buying_price?: number
           created_at?: string
+          faulty_bottles?: number
           id?: string
           low_stock_threshold?: number
           name: string
+          packs?: number
           quantity?: number
           selling_price?: number
           updated_at?: string
         }
         Update: {
+          bales?: number
           bottle_size?: string
+          bottles_per_bale?: number
+          bottles_per_pack?: number
           branch_id?: string | null
           buying_price?: number
           created_at?: string
+          faulty_bottles?: number
           id?: string
           low_stock_threshold?: number
           name?: string
+          packs?: number
           quantity?: number
           selling_price?: number
           updated_at?: string
@@ -614,6 +735,53 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      vouchers: {
+        Row: {
+          amount: number
+          branch_id: string | null
+          category: string
+          created_at: string
+          date: string
+          id: string
+          notes: string | null
+          purpose: string
+          recorded_by: string | null
+          voucher_number: string
+        }
+        Insert: {
+          amount?: number
+          branch_id?: string | null
+          category?: string
+          created_at?: string
+          date?: string
+          id?: string
+          notes?: string | null
+          purpose: string
+          recorded_by?: string | null
+          voucher_number: string
+        }
+        Update: {
+          amount?: number
+          branch_id?: string | null
+          category?: string
+          created_at?: string
+          date?: string
+          id?: string
+          notes?: string | null
+          purpose?: string
+          recorded_by?: string | null
+          voucher_number?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vouchers_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {
