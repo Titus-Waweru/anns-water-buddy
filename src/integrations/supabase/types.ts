@@ -46,9 +46,12 @@ export type Database = {
       }
       customers: {
         Row: {
+          address: string | null
           branch_id: string | null
           created_at: string
           credit_balance: number
+          customer_type: string
+          email: string | null
           id: string
           loyalty_points: number
           name: string
@@ -57,9 +60,12 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          address?: string | null
           branch_id?: string | null
           created_at?: string
           credit_balance?: number
+          customer_type?: string
+          email?: string | null
           id?: string
           loyalty_points?: number
           name: string
@@ -68,9 +74,12 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          address?: string | null
           branch_id?: string | null
           created_at?: string
           credit_balance?: number
+          customer_type?: string
+          email?: string | null
           id?: string
           loyalty_points?: number
           name?: string
