@@ -23,6 +23,8 @@ import Branches from "@/pages/Branches";
 import CashSubmission from "@/pages/CashSubmission";
 import Assets from "@/pages/Assets";
 import Vouchers from "@/pages/Vouchers";
+import Production from "@/pages/Production";
+import Targets from "@/pages/Targets";
 import NotFound from "@/pages/NotFound";
 import { Loader2 } from "lucide-react";
 
@@ -38,6 +40,17 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/** Route guard for specific roles */
+function RoleRoute({ children, allowed }: { children: React.ReactNode; allowed: string[] }) {
+  const { roles, isAdmin } = useAuth();
+  // Admins always pass
+  if (isAdmin) return <>{children}</>;
+  if (allowed.length > 0 && !roles.some(r => allowed.includes(r))) {
+    return <div className="p-6 text-center text-muted-foreground">You don't have permission to access this page.</div>;
+  }
+  return <>{children}</>;
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -46,13 +59,11 @@ const App = () => (
       <BrowserRouter>
         <AuthProvider>
           <Routes>
-            {/* Public routes */}
             <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
             <Route path="/pending" element={<PendingApproval />} />
 
-            {/* Protected app routes */}
             <Route path="/app/*" element={
               <ProtectedRoute>
                 <DataProvider>
@@ -60,17 +71,19 @@ const App = () => (
                     <Routes>
                       <Route path="/" element={<Dashboard />} />
                       <Route path="/inventory" element={<Inventory />} />
-                      <Route path="/sales" element={<Sales />} />
-                      <Route path="/purchases" element={<Purchases />} />
-                      <Route path="/customers" element={<Customers />} />
-                      <Route path="/suppliers" element={<Suppliers />} />
-                      <Route path="/transactions" element={<Transactions />} />
-                      <Route path="/reports" element={<Reports />} />
-                      <Route path="/teams" element={<Teams />} />
-                      <Route path="/branches" element={<Branches />} />
-                      <Route path="/cash-submission" element={<CashSubmission />} />
-                      <Route path="/assets" element={<Assets />} />
-                      <Route path="/vouchers" element={<Vouchers />} />
+                      <Route path="/sales" element={<RoleRoute allowed={["cashier", "stock_manager"]}><Sales /></RoleRoute>} />
+                      <Route path="/purchases" element={<RoleRoute allowed={[]}><Purchases /></RoleRoute>} />
+                      <Route path="/customers" element={<RoleRoute allowed={["cashier"]}><Customers /></RoleRoute>} />
+                      <Route path="/suppliers" element={<RoleRoute allowed={[]}><Suppliers /></RoleRoute>} />
+                      <Route path="/transactions" element={<RoleRoute allowed={[]}><Transactions /></RoleRoute>} />
+                      <Route path="/reports" element={<RoleRoute allowed={[]}><Reports /></RoleRoute>} />
+                      <Route path="/teams" element={<RoleRoute allowed={[]}><Teams /></RoleRoute>} />
+                      <Route path="/branches" element={<RoleRoute allowed={[]}><Branches /></RoleRoute>} />
+                      <Route path="/cash-submission" element={<RoleRoute allowed={["cashier"]}><CashSubmission /></RoleRoute>} />
+                      <Route path="/assets" element={<RoleRoute allowed={[]}><Assets /></RoleRoute>} />
+                      <Route path="/vouchers" element={<RoleRoute allowed={[]}><Vouchers /></RoleRoute>} />
+                      <Route path="/production" element={<RoleRoute allowed={["stock_manager"]}><Production /></RoleRoute>} />
+                      <Route path="/targets" element={<RoleRoute allowed={[]}><Targets /></RoleRoute>} />
                       <Route path="*" element={<NotFound />} />
                     </Routes>
                   </AppLayout>

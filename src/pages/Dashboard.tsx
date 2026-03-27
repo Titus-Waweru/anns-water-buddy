@@ -1,26 +1,56 @@
-import { useMemo } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useData } from "@/context/DataContext";
 import { useAuth } from "@/context/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Package, ShoppingCart, TrendingUp, AlertTriangle, DollarSign, ArrowDownCircle, Users, CreditCard } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
+import { Package, ShoppingCart, TrendingUp, AlertTriangle, DollarSign, ArrowDownCircle, Users, CreditCard, Target, Trophy } from "lucide-react";
 import { format, isToday, startOfMonth, isAfter, subDays, startOfDay } from "date-fns";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, CartesianGrid, Legend } from "recharts";
 
 const COLORS = ["hsl(195,85%,55%)", "hsl(142,71%,45%)", "hsl(38,92%,50%)", "hsl(0,72%,51%)", "hsl(220,70%,22%)"];
 
+interface UserTarget {
+  id: string;
+  target_type: string;
+  target_value: number;
+  current_value: number;
+  period_start: string;
+  period_end: string;
+  reward: string;
+  consequence: string;
+  period: string;
+}
+
 export default function Dashboard() {
   const { products, sales, purchases, customers } = useData();
-  const { profile } = useAuth();
+  const { profile, user, isAdmin, roles } = useAuth();
+  const [myTargets, setMyTargets] = useState<UserTarget[]>([]);
+
+  // Fetch targets for current user
+  useEffect(() => {
+    if (!user) return;
+    supabase.from("targets").select("*")
+      .eq("user_id", user.id)
+      .gte("period_end", new Date().toISOString().split("T")[0])
+      .then(({ data }) => {
+        if (data) setMyTargets(data.map(t => ({
+          ...t,
+          reward: (t as any).reward || "",
+          consequence: (t as any).consequence || "",
+          period: (t as any).period || "monthly",
+        })));
+      });
+  }, [user]);
 
   const todaySales = sales.filter(s => isToday(new Date(s.date)));
-  const todayPurchases = purchases.filter(p => isToday(new Date(p.date)));
   const monthStart = startOfMonth(new Date());
   const monthSales = sales.filter(s => isAfter(new Date(s.date), monthStart));
   const monthPurchases = purchases.filter(p => isAfter(new Date(p.date), monthStart));
 
   const todaySalesTotal = todaySales.reduce((sum, s) => sum + s.final_amount, 0);
-  const todayPurchasesTotal = todayPurchases.reduce((sum, p) => sum + p.total_cost, 0);
+  const todayPurchasesTotal = purchases.filter(p => isToday(new Date(p.date))).reduce((sum, p) => sum + p.total_cost, 0);
   const todayProfit = todaySales.reduce((sum, s) => sum + s.profit, 0);
   const monthProfit = monthSales.reduce((sum, s) => sum + s.profit, 0);
   const monthRevenue = monthSales.reduce((sum, s) => sum + s.final_amount, 0);
@@ -30,7 +60,13 @@ export default function Dashboard() {
   const totalDebt = customers.reduce((sum, c) => sum + c.credit_balance, 0);
   const debtCustomers = customers.filter(c => c.credit_balance > 0);
 
-  // Revenue vs Purchases - last 7 days
+  // Expected vs actual profit (based on inventory margin)
+  const expectedProfit = useMemo(() => {
+    return products.reduce((sum, p) => sum + (p.selling_price - p.buying_price) * p.quantity, 0);
+  }, [products]);
+  const profitDiff = monthProfit - expectedProfit;
+  const profitMismatch = expectedProfit > 0 && Math.abs(profitDiff) > expectedProfit * 0.1;
+
   const last7Days = useMemo(() => {
     const days = [];
     for (let i = 6; i >= 0; i--) {
@@ -49,7 +85,6 @@ export default function Dashboard() {
     return days;
   }, [sales, purchases]);
 
-  // Payment breakdown
   const paymentData = useMemo(() => {
     const cash = monthSales.filter(s => s.payment_mode === "Cash").reduce((a, s) => a + s.final_amount, 0);
     const mpesa = monthSales.filter(s => s.payment_mode === "Mpesa").reduce((a, s) => a + s.final_amount, 0);
@@ -61,7 +96,6 @@ export default function Dashboard() {
     ].filter(d => d.value > 0);
   }, [monthSales]);
 
-  // Stock levels - top products
   const stockData = useMemo(() => {
     return products.slice(0, 10).map(p => ({
       name: p.name.length > 12 ? p.name.slice(0, 12) + "…" : p.name,
@@ -80,12 +114,48 @@ export default function Dashboard() {
     return "Good evening";
   };
 
+  const isCashier = roles.includes("cashier") && !isAdmin;
+  const isStockMgr = roles.includes("stock_manager") && !isAdmin;
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-foreground">{greeting()}, {profile?.full_name?.split(" ")[0] || "there"} 👋</h1>
         <p className="text-muted-foreground text-sm">Here's your Wonder Aqua overview</p>
       </div>
+
+      {/* My Targets (for cashiers / stock managers) */}
+      {myTargets.length > 0 && (
+        <div className="space-y-3">
+          <h2 className="text-sm font-semibold text-foreground flex items-center gap-2"><Target className="h-4 w-4 text-primary" /> My Targets</h2>
+          <div className="grid sm:grid-cols-2 gap-3">
+            {myTargets.map(t => {
+              const pct = t.target_value > 0 ? Math.min(100, (t.current_value / t.target_value) * 100) : 0;
+              const remaining = Math.max(0, t.target_value - t.current_value);
+              const statusColor = pct >= 75 ? "text-success" : pct >= 40 ? "text-yellow-600" : "text-destructive";
+              const statusLabel = pct >= 75 ? "On Track" : pct >= 40 ? "Behind" : "At Risk";
+              return (
+                <Card key={t.id} className="border-primary/20">
+                  <CardContent className="p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium capitalize text-foreground">{t.target_type} Target</span>
+                      <Badge variant="outline" className={`${statusColor} text-[10px]`}>{statusLabel}</Badge>
+                    </div>
+                    <Progress value={pct} className="h-2" />
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>Current: {t.target_type === "sales" ? t.current_value : `KSh ${t.current_value.toLocaleString()}`}</span>
+                      <span>Target: {t.target_type === "sales" ? t.target_value : `KSh ${t.target_value.toLocaleString()}`}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">Remaining: <strong>{t.target_type === "sales" ? remaining : `KSh ${remaining.toLocaleString()}`}</strong></p>
+                    {t.reward && <p className="text-xs text-success flex items-center gap-1"><Trophy className="h-3 w-3" /> {t.reward}</p>}
+                    {t.consequence && <p className="text-xs text-destructive flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> {t.consequence}</p>}
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Stats grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -95,24 +165,28 @@ export default function Dashboard() {
             <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center"><ShoppingCart className="h-5 w-5 text-secondary" /></div>
           </div>
         </CardContent></Card>
-        <Card className="stat-card"><CardContent className="p-4">
-          <div className="flex items-center justify-between">
-            <div><p className="text-xs text-muted-foreground font-medium">Today's Purchases</p><p className="text-xl font-bold text-foreground">KSh {todayPurchasesTotal.toLocaleString()}</p></div>
-            <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center"><ArrowDownCircle className="h-5 w-5 text-secondary" /></div>
-          </div>
-        </CardContent></Card>
+        {!isCashier && (
+          <Card className="stat-card"><CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div><p className="text-xs text-muted-foreground font-medium">Today's Purchases</p><p className="text-xl font-bold text-foreground">KSh {todayPurchasesTotal.toLocaleString()}</p></div>
+              <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center"><ArrowDownCircle className="h-5 w-5 text-secondary" /></div>
+            </div>
+          </CardContent></Card>
+        )}
         <Card className="stat-card"><CardContent className="p-4">
           <div className="flex items-center justify-between">
             <div><p className="text-xs text-muted-foreground font-medium">Today's Profit</p><p className="text-xl font-bold text-success">KSh {todayProfit.toLocaleString()}</p></div>
             <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center"><TrendingUp className="h-5 w-5 text-success" /></div>
           </div>
         </CardContent></Card>
-        <Card className="stat-card"><CardContent className="p-4">
-          <div className="flex items-center justify-between">
-            <div><p className="text-xs text-muted-foreground font-medium">Monthly Profit</p><p className="text-xl font-bold text-success">KSh {monthProfit.toLocaleString()}</p></div>
-            <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center"><DollarSign className="h-5 w-5 text-success" /></div>
-          </div>
-        </CardContent></Card>
+        {!isCashier && !isStockMgr && (
+          <Card className="stat-card"><CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div><p className="text-xs text-muted-foreground font-medium">Monthly Profit</p><p className="text-xl font-bold text-success">KSh {monthProfit.toLocaleString()}</p></div>
+              <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center"><DollarSign className="h-5 w-5 text-success" /></div>
+            </div>
+          </CardContent></Card>
+        )}
         <Card className="stat-card"><CardContent className="p-4">
           <div className="flex items-center justify-between">
             <div><p className="text-xs text-muted-foreground font-medium">Inventory</p><p className="text-xl font-bold text-foreground">{totalInventory} bottles</p></div>
@@ -125,88 +199,134 @@ export default function Dashboard() {
             <div className="h-10 w-10 rounded-lg bg-destructive/10 flex items-center justify-center"><AlertTriangle className="h-5 w-5 text-destructive" /></div>
           </div>
         </CardContent></Card>
-        <Card className="stat-card"><CardContent className="p-4">
-          <div className="flex items-center justify-between">
-            <div><p className="text-xs text-muted-foreground font-medium">Customers</p><p className="text-xl font-bold text-foreground">{customers.length}</p></div>
-            <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center"><Users className="h-5 w-5 text-secondary" /></div>
-          </div>
-        </CardContent></Card>
-        <Card className="stat-card"><CardContent className="p-4">
-          <div className="flex items-center justify-between">
-            <div><p className="text-xs text-muted-foreground font-medium">Customer Debt</p><p className="text-xl font-bold text-destructive">KSh {totalDebt.toLocaleString()}</p></div>
-            <div className="h-10 w-10 rounded-lg bg-destructive/10 flex items-center justify-center"><CreditCard className="h-5 w-5 text-destructive" /></div>
-          </div>
-        </CardContent></Card>
+        {!isStockMgr && (
+          <>
+            <Card className="stat-card"><CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div><p className="text-xs text-muted-foreground font-medium">Customers</p><p className="text-xl font-bold text-foreground">{customers.length}</p></div>
+                <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center"><Users className="h-5 w-5 text-secondary" /></div>
+              </div>
+            </CardContent></Card>
+            <Card className="stat-card"><CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div><p className="text-xs text-muted-foreground font-medium">Customer Debt</p><p className="text-xl font-bold text-destructive">KSh {totalDebt.toLocaleString()}</p></div>
+                <div className="h-10 w-10 rounded-lg bg-destructive/10 flex items-center justify-center"><CreditCard className="h-5 w-5 text-destructive" /></div>
+              </div>
+            </CardContent></Card>
+          </>
+        )}
       </div>
 
-      {/* Charts row */}
-      <div className="grid lg:grid-cols-2 gap-4">
-        {/* Revenue vs Purchases - 7 days */}
-        <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold">Revenue vs Purchases (7 Days)</CardTitle></CardHeader>
+      {/* Performance Analysis - admin only */}
+      {isAdmin && (
+        <Card className={profitMismatch ? "border-destructive/40 bg-destructive/5" : "border-success/30 bg-success/5"}>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              {profitMismatch ? <AlertTriangle className="h-4 w-4 text-destructive" /> : <TrendingUp className="h-4 w-4 text-success" />}
+              Performance Analysis
+            </CardTitle>
+          </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={last7Days}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(210,20%,88%)" />
-                <XAxis dataKey="day" tick={{ fontSize: 12 }} stroke="hsl(220,10%,45%)" />
-                <YAxis tick={{ fontSize: 11 }} stroke="hsl(220,10%,45%)" />
-                <Tooltip formatter={(v: number) => `KSh ${v.toLocaleString()}`} />
-                <Legend />
-                <Line type="monotone" dataKey="Revenue" stroke="hsl(195,85%,55%)" strokeWidth={2} dot={{ r: 3 }} />
-                <Line type="monotone" dataKey="Purchases" stroke="hsl(0,72%,51%)" strokeWidth={2} dot={{ r: 3 }} />
-                <Line type="monotone" dataKey="Profit" stroke="hsl(142,71%,45%)" strokeWidth={2} dot={{ r: 3 }} />
-              </LineChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-
-        {/* Payment breakdown */}
-        <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold">Payment Breakdown (This Month)</CardTitle></CardHeader>
-          <CardContent>
-            {paymentData.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-10">No sales this month yet.</p>
-            ) : (
-              <div className="flex items-center gap-4">
-                <ResponsiveContainer width="50%" height={180}>
-                  <PieChart>
-                    <Pie data={paymentData} cx="50%" cy="50%" outerRadius={70} dataKey="value" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false}>
-                      {paymentData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                    </Pie>
-                    <Tooltip formatter={(v: number) => `KSh ${v.toLocaleString()}`} />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div className="space-y-2 text-sm">
-                  {paymentData.map((d, i) => (
-                    <div key={d.name} className="flex items-center gap-2">
-                      <div className="h-3 w-3 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
-                      <span>{d.name}: <strong>KSh {d.value.toLocaleString()}</strong></span>
-                    </div>
-                  ))}
-                </div>
+            <div className="grid grid-cols-3 gap-4 text-sm">
+              <div>
+                <p className="text-muted-foreground">Expected Profit (Stock Margin)</p>
+                <p className="text-lg font-bold text-foreground">KSh {expectedProfit.toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Actual Monthly Profit</p>
+                <p className="text-lg font-bold text-foreground">KSh {monthProfit.toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Difference</p>
+                <p className={`text-lg font-bold ${profitDiff >= 0 ? "text-success" : "text-destructive"}`}>
+                  {profitDiff >= 0 ? "+" : ""}KSh {profitDiff.toLocaleString()}
+                </p>
+              </div>
+            </div>
+            {profitMismatch && (
+              <div className="mt-3 bg-destructive/10 rounded-lg p-3 text-sm text-destructive">
+                <p className="font-semibold">⚠️ Profit mismatch detected</p>
+                <p className="text-xs mt-1">Possible causes: stock loss, theft, incorrect entries, or unsold discounted items.</p>
+              </div>
+            )}
+            {!profitMismatch && expectedProfit > 0 && (
+              <div className="mt-3 bg-success/10 rounded-lg p-3 text-sm text-success">
+                <p className="font-semibold">✅ Profit is accurate — within expected range</p>
               </div>
             )}
           </CardContent>
         </Card>
-      </div>
+      )}
 
-      {/* Stock levels chart */}
-      {stockData.length > 0 && (
-        <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold">Stock Levels</CardTitle></CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={stockData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(210,20%,88%)" />
-                <XAxis dataKey="name" tick={{ fontSize: 11 }} stroke="hsl(220,10%,45%)" />
-                <YAxis tick={{ fontSize: 11 }} stroke="hsl(220,10%,45%)" />
-                <Tooltip />
-                <Bar dataKey="Stock" fill="hsl(195,85%,55%)" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="Threshold" fill="hsl(0,72%,51%)" radius={[4, 4, 0, 0]} opacity={0.4} />
-              </BarChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
+      {/* Charts - admin/supervisor only */}
+      {isAdmin && (
+        <>
+          <div className="grid lg:grid-cols-2 gap-4">
+            <Card>
+              <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold">Revenue vs Purchases (7 Days)</CardTitle></CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={220}>
+                  <LineChart data={last7Days}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(210,20%,88%)" />
+                    <XAxis dataKey="day" tick={{ fontSize: 12 }} stroke="hsl(220,10%,45%)" />
+                    <YAxis tick={{ fontSize: 11 }} stroke="hsl(220,10%,45%)" />
+                    <Tooltip formatter={(v: number) => `KSh ${v.toLocaleString()}`} />
+                    <Legend />
+                    <Line type="monotone" dataKey="Revenue" stroke="hsl(195,85%,55%)" strokeWidth={2} dot={{ r: 3 }} />
+                    <Line type="monotone" dataKey="Purchases" stroke="hsl(0,72%,51%)" strokeWidth={2} dot={{ r: 3 }} />
+                    <Line type="monotone" dataKey="Profit" stroke="hsl(142,71%,45%)" strokeWidth={2} dot={{ r: 3 }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold">Payment Breakdown (This Month)</CardTitle></CardHeader>
+              <CardContent>
+                {paymentData.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-10">No sales this month yet.</p>
+                ) : (
+                  <div className="flex items-center gap-4">
+                    <ResponsiveContainer width="50%" height={180}>
+                      <PieChart>
+                        <Pie data={paymentData} cx="50%" cy="50%" outerRadius={70} dataKey="value" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false}>
+                          {paymentData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                        </Pie>
+                        <Tooltip formatter={(v: number) => `KSh ${v.toLocaleString()}`} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="space-y-2 text-sm">
+                      {paymentData.map((d, i) => (
+                        <div key={d.name} className="flex items-center gap-2">
+                          <div className="h-3 w-3 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
+                          <span>{d.name}: <strong>KSh {d.value.toLocaleString()}</strong></span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {stockData.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold">Stock Levels</CardTitle></CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={stockData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(210,20%,88%)" />
+                    <XAxis dataKey="name" tick={{ fontSize: 11 }} stroke="hsl(220,10%,45%)" />
+                    <YAxis tick={{ fontSize: 11 }} stroke="hsl(220,10%,45%)" />
+                    <Tooltip />
+                    <Bar dataKey="Stock" fill="hsl(195,85%,55%)" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="Threshold" fill="hsl(0,72%,51%)" radius={[4, 4, 0, 0]} opacity={0.4} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          )}
+        </>
       )}
 
       {/* Low stock alerts */}
@@ -228,8 +348,8 @@ export default function Dashboard() {
         </Card>
       )}
 
-      {/* Customer debt overview */}
-      {debtCustomers.length > 0 && (
+      {/* Customer debt - not for stock managers */}
+      {!isStockMgr && debtCustomers.length > 0 && (
         <Card className="border-warning/30 bg-warning/5">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold flex items-center gap-2 text-warning">
@@ -248,69 +368,73 @@ export default function Dashboard() {
         </Card>
       )}
 
-      {/* Monthly summary */}
-      <Card>
-        <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold">Monthly Summary</CardTitle></CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
-            <div><p className="text-muted-foreground">Revenue</p><p className="text-lg font-bold">KSh {monthRevenue.toLocaleString()}</p></div>
-            <div><p className="text-muted-foreground">Purchases</p><p className="text-lg font-bold">KSh {monthPurchaseTotal.toLocaleString()}</p></div>
-            <div><p className="text-muted-foreground">Profit</p><p className="text-lg font-bold text-success">KSh {monthProfit.toLocaleString()}</p></div>
-            <div><p className="text-muted-foreground">Sales Count</p><p className="text-lg font-bold">{monthSales.length}</p></div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Recent activity */}
-      <div className="grid lg:grid-cols-2 gap-4">
+      {/* Monthly summary - admin only */}
+      {isAdmin && (
         <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold">Recent Sales</CardTitle></CardHeader>
+          <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold">Monthly Summary</CardTitle></CardHeader>
           <CardContent>
-            {recentSales.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">No sales recorded yet.</p>
-            ) : (
-              <div className="space-y-3">
-                {recentSales.map(s => (
-                  <div key={s.id} className="flex items-center justify-between text-sm border-b pb-2 last:border-0">
-                    <div>
-                      <p className="font-medium text-foreground">{s.product_name} × {s.quantity}</p>
-                      <p className="text-xs text-muted-foreground">{s.customer_name || "Walk-in"} · {format(new Date(s.date), "dd MMM, HH:mm")}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-semibold text-foreground">KSh {s.final_amount.toLocaleString()}</p>
-                      <Badge variant="outline" className="text-[10px]">{s.payment_mode}</Badge>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
+              <div><p className="text-muted-foreground">Revenue</p><p className="text-lg font-bold">KSh {monthRevenue.toLocaleString()}</p></div>
+              <div><p className="text-muted-foreground">Purchases</p><p className="text-lg font-bold">KSh {monthPurchaseTotal.toLocaleString()}</p></div>
+              <div><p className="text-muted-foreground">Profit</p><p className="text-lg font-bold text-success">KSh {monthProfit.toLocaleString()}</p></div>
+              <div><p className="text-muted-foreground">Sales Count</p><p className="text-lg font-bold">{monthSales.length}</p></div>
+            </div>
           </CardContent>
         </Card>
+      )}
 
-        <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold">Recent Purchases</CardTitle></CardHeader>
-          <CardContent>
-            {recentPurchases.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">No purchases recorded yet.</p>
-            ) : (
-              <div className="space-y-3">
-                {recentPurchases.map(p => (
-                  <div key={p.id} className="flex items-center justify-between text-sm border-b pb-2 last:border-0">
-                    <div>
-                      <p className="font-medium text-foreground">{p.product_name} × {p.quantity}</p>
-                      <p className="text-xs text-muted-foreground">{p.supplier_name} · {format(new Date(p.date), "dd MMM, HH:mm")}</p>
+      {/* Recent activity - admin only */}
+      {isAdmin && (
+        <div className="grid lg:grid-cols-2 gap-4">
+          <Card>
+            <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold">Recent Sales</CardTitle></CardHeader>
+            <CardContent>
+              {recentSales.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-4 text-center">No sales recorded yet.</p>
+              ) : (
+                <div className="space-y-3">
+                  {recentSales.map(s => (
+                    <div key={s.id} className="flex items-center justify-between text-sm border-b pb-2 last:border-0">
+                      <div>
+                        <p className="font-medium text-foreground">{s.product_name} × {s.quantity}</p>
+                        <p className="text-xs text-muted-foreground">{s.customer_name || "Walk-in"} · {format(new Date(s.date), "dd MMM, HH:mm")}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-semibold text-foreground">KSh {s.final_amount.toLocaleString()}</p>
+                        <Badge variant="outline" className="text-[10px]">{s.payment_mode}</Badge>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <p className="font-semibold text-foreground">KSh {p.total_cost.toLocaleString()}</p>
-                      <Badge variant="outline" className="text-[10px]">{p.payment_mode}</Badge>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold">Recent Purchases</CardTitle></CardHeader>
+            <CardContent>
+              {recentPurchases.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-4 text-center">No purchases recorded yet.</p>
+              ) : (
+                <div className="space-y-3">
+                  {recentPurchases.map(p => (
+                    <div key={p.id} className="flex items-center justify-between text-sm border-b pb-2 last:border-0">
+                      <div>
+                        <p className="font-medium text-foreground">{p.product_name} × {p.quantity}</p>
+                        <p className="text-xs text-muted-foreground">{p.supplier_name} · {format(new Date(p.date), "dd MMM, HH:mm")}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-semibold text-foreground">KSh {p.total_cost.toLocaleString()}</p>
+                        <Badge variant="outline" className="text-[10px]">{p.payment_mode}</Badge>
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

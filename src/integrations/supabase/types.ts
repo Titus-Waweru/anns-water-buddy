@@ -638,39 +638,54 @@ export type Database = {
       }
       targets: {
         Row: {
+          actual_profit: number
           branch_id: string | null
+          consequence: string | null
           created_at: string
           created_by: string
           current_value: number
+          expected_profit: number
           id: string
+          period: string
           period_end: string
           period_start: string
+          reward: string | null
           target_type: string
           target_value: number
           updated_at: string
           user_id: string
         }
         Insert: {
+          actual_profit?: number
           branch_id?: string | null
+          consequence?: string | null
           created_at?: string
           created_by: string
           current_value?: number
+          expected_profit?: number
           id?: string
+          period?: string
           period_end: string
           period_start: string
+          reward?: string | null
           target_type: string
           target_value: number
           updated_at?: string
           user_id: string
         }
         Update: {
+          actual_profit?: number
           branch_id?: string | null
+          consequence?: string | null
           created_at?: string
           created_by?: string
           current_value?: number
+          expected_profit?: number
           id?: string
+          period?: string
           period_end?: string
           period_start?: string
+          reward?: string | null
           target_type?: string
           target_value?: number
           updated_at?: string
