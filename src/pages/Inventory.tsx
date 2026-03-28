@@ -10,8 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { AlertTriangle, Plus, Package, Loader2, ClipboardCheck } from "lucide-react";
-import { format } from "date-fns";
+import { AlertTriangle, Plus, Package, ClipboardCheck } from "lucide-react";
 import { toast } from "sonner";
 
 interface StockAdj {
@@ -27,16 +26,18 @@ interface StockAdj {
 
 export default function Inventory() {
   const { products, addProduct, inventoryLogs, refetch } = useData();
-  const { user, isAdmin, hasRole, branchId } = useAuth();
+  const { user, isAdmin, hasRole, branchId, roles } = useAuth();
   const [open, setOpen] = useState(false);
   const [adjOpen, setAdjOpen] = useState(false);
   const [adjustments, setAdjustments] = useState<StockAdj[]>([]);
-  const [adjLoading, setAdjLoading] = useState(false);
+
+  const isCashier = roles.includes("cashier") && !isAdmin;
+  const canAddProduct = isAdmin || hasRole("stock_manager");
+  const canAdjust = isAdmin || hasRole("stock_manager");
 
   const [form, setForm] = useState({
     name: "", bottle_size: "", buying_price: 0, selling_price: 0, quantity: 0,
-    low_stock_threshold: 5, bales: 0, packs: 0, faulty_bottles: 0,
-    bottles_per_bale: 90, bottles_per_pack: 12,
+    low_stock_threshold: 5,
   });
 
   const [adjForm, setAdjForm] = useState({
@@ -47,33 +48,21 @@ export default function Inventory() {
     e.preventDefault();
     if (!form.name.trim() || !form.bottle_size.trim()) return;
 
-    // Calculate total bottles from bales + packs + individual
-    const totalFromBales = form.bales * form.bottles_per_bale;
-    const totalFromPacks = form.packs * form.bottles_per_pack;
-    const totalSellable = form.quantity + totalFromBales + totalFromPacks - form.faulty_bottles;
-
     await addProduct({
       ...form,
-      quantity: Math.max(0, totalSellable),
       branch_id: branchId,
     } as any);
 
-    setForm({
-      name: "", bottle_size: "", buying_price: 0, selling_price: 0, quantity: 0,
-      low_stock_threshold: 5, bales: 0, packs: 0, faulty_bottles: 0,
-      bottles_per_bale: 90, bottles_per_pack: 12,
-    });
+    setForm({ name: "", bottle_size: "", buying_price: 0, selling_price: 0, quantity: 0, low_stock_threshold: 5 });
     setOpen(false);
     toast.success("Product added!");
   };
 
   const fetchAdjustments = async () => {
-    setAdjLoading(true);
     let q = supabase.from("stock_adjustments").select("*").order("created_at", { ascending: false });
     if (!isAdmin && branchId) q = q.eq("branch_id", branchId);
     const { data } = await q;
     if (data) setAdjustments(data as StockAdj[]);
-    setAdjLoading(false);
   };
 
   const handleAdjSubmit = async (e: React.FormEvent) => {
@@ -85,7 +74,6 @@ export default function Inventory() {
     const product = products.find(p => p.id === adjForm.productId);
     if (!product) return;
 
-    // If superadmin, auto-approve
     const autoApprove = isAdmin;
     const { error } = await supabase.from("stock_adjustments").insert({
       product_id: adjForm.productId,
@@ -107,8 +95,7 @@ export default function Inventory() {
         : Math.max(0, product.quantity - adjForm.quantity);
       await supabase.from("products").update({ quantity: newQty }).eq("id", product.id);
       await supabase.from("inventory_logs").insert({
-        product_id: product.id,
-        product_name: product.name,
+        product_id: product.id, product_name: product.name,
         type: adjForm.adjustmentType === "increase" ? "IN" : "OUT",
         quantity: adjForm.quantity,
         reference: `Stock Adjustment: ${adjForm.reason}`,
@@ -132,8 +119,7 @@ export default function Inventory() {
           : Math.max(0, product.quantity - adj.quantity);
         await supabase.from("products").update({ quantity: newQty }).eq("id", product.id);
         await supabase.from("inventory_logs").insert({
-          product_id: product.id,
-          product_name: adj.product_name,
+          product_id: product.id, product_name: adj.product_name,
           type: adj.adjustment_type === "increase" ? "IN" : "OUT",
           quantity: adj.quantity,
           reference: `Stock Adjustment: ${adj.reason || "Approved"}`,
@@ -152,162 +138,134 @@ export default function Inventory() {
 
   const lowStockProducts = products.filter(p => p.quantity <= p.low_stock_threshold);
 
-  const canAddProduct = isAdmin || hasRole("stock_manager");
-  const canAdjust = isAdmin || hasRole("stock_manager");
-
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Inventory</h1>
-          <p className="text-sm text-muted-foreground">Manage your water bottle stock</p>
+          <p className="text-sm text-muted-foreground">
+            {isCashier ? "View current stock levels" : "Manage your product catalog and stock"}
+          </p>
         </div>
-        <div className="flex gap-2">
-          {canAdjust && (
-            <Dialog open={adjOpen} onOpenChange={v => { setAdjOpen(v); if (v) fetchAdjustments(); }}>
-              <DialogTrigger asChild>
-                <Button variant="outline" className="gap-2"><ClipboardCheck className="h-4 w-4" /> Stock Adjustment</Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-lg">
-                <DialogHeader><DialogTitle>Stock Adjustments</DialogTitle></DialogHeader>
-                <form onSubmit={handleAdjSubmit} className="space-y-4">
-                  <div>
-                    <Label>Product *</Label>
-                    <Select value={adjForm.productId} onValueChange={v => setAdjForm({ ...adjForm, productId: v })}>
-                      <SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger>
-                      <SelectContent>
-                        {products.map(p => <SelectItem key={p.id} value={p.id}>{p.name} ({p.bottle_size}) — {p.quantity} in stock</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
+        {!isCashier && (
+          <div className="flex gap-2">
+            {canAdjust && (
+              <Dialog open={adjOpen} onOpenChange={v => { setAdjOpen(v); if (v) fetchAdjustments(); }}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" className="gap-2"><ClipboardCheck className="h-4 w-4" /> Stock Adjustment</Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-lg">
+                  <DialogHeader><DialogTitle>Stock Adjustments</DialogTitle></DialogHeader>
+                  <form onSubmit={handleAdjSubmit} className="space-y-4">
                     <div>
-                      <Label>Type</Label>
-                      <Select value={adjForm.adjustmentType} onValueChange={v => setAdjForm({ ...adjForm, adjustmentType: v as any })}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
+                      <Label>Product *</Label>
+                      <Select value={adjForm.productId} onValueChange={v => setAdjForm({ ...adjForm, productId: v })}>
+                        <SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="increase">Increase</SelectItem>
-                          <SelectItem value="decrease">Decrease</SelectItem>
+                          {products.map(p => <SelectItem key={p.id} value={p.id}>{p.name} ({p.bottle_size}) — {p.quantity} in stock</SelectItem>)}
                         </SelectContent>
                       </Select>
                     </div>
-                    <div>
-                      <Label>Quantity *</Label>
-                      <Input type="number" min={1} value={adjForm.quantity || ""} onChange={e => setAdjForm({ ...adjForm, quantity: Number(e.target.value) })} required />
-                    </div>
-                  </div>
-                  <div>
-                    <Label>Reason *</Label>
-                    <Textarea value={adjForm.reason} onChange={e => setAdjForm({ ...adjForm, reason: e.target.value })} placeholder="Explain adjustment reason..." required />
-                  </div>
-                  <Button type="submit" className="w-full">
-                    {isAdmin ? "Apply Adjustment" : "Submit for Approval"}
-                  </Button>
-                </form>
-
-                {/* Pending adjustments for admins */}
-                {adjustments.length > 0 && (
-                  <div className="mt-4 space-y-2 max-h-48 overflow-y-auto">
-                    <p className="text-sm font-semibold text-foreground">Recent Adjustments</p>
-                    {adjustments.map(adj => (
-                      <div key={adj.id} className="flex items-center justify-between text-sm border rounded-lg p-2">
-                        <div>
-                          <p className="font-medium text-foreground">{adj.product_name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {adj.adjustment_type === "increase" ? "+" : "-"}{adj.quantity} · {adj.reason}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Badge variant={adj.status === "approved" ? "default" : adj.status === "rejected" ? "destructive" : "secondary"}
-                            className={adj.status === "approved" ? "bg-success" : ""}>
-                            {adj.status}
-                          </Badge>
-                          {isAdmin && adj.status === "pending" && (
-                            <div className="flex gap-1">
-                              <Button size="sm" variant="ghost" className="h-6 text-xs text-success" onClick={() => handleApproveAdj(adj, true)}>✓</Button>
-                              <Button size="sm" variant="ghost" className="h-6 text-xs text-destructive" onClick={() => handleApproveAdj(adj, false)}>✗</Button>
-                            </div>
-                          )}
-                        </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label>Type</Label>
+                        <Select value={adjForm.adjustmentType} onValueChange={v => setAdjForm({ ...adjForm, adjustmentType: v as any })}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="increase">Increase</SelectItem>
+                            <SelectItem value="decrease">Decrease</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </DialogContent>
-            </Dialog>
-          )}
-          {canAddProduct && (
-            <Dialog open={open} onOpenChange={setOpen}>
-              <DialogTrigger asChild>
-                <Button className="gap-2"><Plus className="h-4 w-4" /> Add Product</Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-lg">
-                <DialogHeader><DialogTitle>Add New Product</DialogTitle></DialogHeader>
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <Label>Product Name</Label>
-                      <Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Wonder Aqua" required />
-                    </div>
-                    <div>
-                      <Label>Bottle Size</Label>
-                      <Input value={form.bottle_size} onChange={e => setForm({ ...form, bottle_size: e.target.value })} placeholder="e.g. 20L" required />
-                    </div>
-                    <div>
-                      <Label>Buying Price (KSh)</Label>
-                      <Input type="number" min={0} value={form.buying_price || ""} onChange={e => setForm({ ...form, buying_price: Number(e.target.value) })} required />
-                    </div>
-                    <div>
-                      <Label>Selling Price (KSh)</Label>
-                      <Input type="number" min={0} value={form.selling_price || ""} onChange={e => setForm({ ...form, selling_price: Number(e.target.value) })} required />
-                    </div>
-                  </div>
-
-                  <p className="text-sm font-semibold text-foreground pt-2">Batch Entry</p>
-                  <div className="grid grid-cols-3 gap-3">
-                    <div>
-                      <Label>Bales (×{form.bottles_per_bale})</Label>
-                      <Input type="number" min={0} value={form.bales || ""} onChange={e => setForm({ ...form, bales: Number(e.target.value) })} />
-                    </div>
-                    <div>
-                      <Label>Packs (×{form.bottles_per_pack})</Label>
-                      <Input type="number" min={0} value={form.packs || ""} onChange={e => setForm({ ...form, packs: Number(e.target.value) })} />
-                    </div>
-                    <div>
-                      <Label>Loose Bottles</Label>
-                      <Input type="number" min={0} value={form.quantity || ""} onChange={e => setForm({ ...form, quantity: Number(e.target.value) })} />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <Label>Faulty/Reject</Label>
-                      <Input type="number" min={0} value={form.faulty_bottles || ""} onChange={e => setForm({ ...form, faulty_bottles: Number(e.target.value) })} />
-                    </div>
-                    <div>
-                      <Label>Low Stock Threshold</Label>
-                      <Input type="number" min={0} value={form.low_stock_threshold || ""} onChange={e => setForm({ ...form, low_stock_threshold: Number(e.target.value) })} />
-                    </div>
-                  </div>
-
-                  <Card className="bg-muted/50">
-                    <CardContent className="p-3 text-sm space-y-1">
-                      <div className="flex justify-between"><span>From Bales</span><span>{form.bales * form.bottles_per_bale}</span></div>
-                      <div className="flex justify-between"><span>From Packs</span><span>{form.packs * form.bottles_per_pack}</span></div>
-                      <div className="flex justify-between"><span>Loose</span><span>{form.quantity}</span></div>
-                      <div className="flex justify-between text-destructive"><span>Faulty</span><span>-{form.faulty_bottles}</span></div>
-                      <div className="flex justify-between font-bold border-t pt-1">
-                        <span>Sellable Stock</span>
-                        <span>{Math.max(0, form.quantity + form.bales * form.bottles_per_bale + form.packs * form.bottles_per_pack - form.faulty_bottles)}</span>
+                      <div>
+                        <Label>Quantity *</Label>
+                        <Input type="number" min={1} value={adjForm.quantity || ""} onChange={e => setAdjForm({ ...adjForm, quantity: Number(e.target.value) })} required />
                       </div>
-                    </CardContent>
-                  </Card>
+                    </div>
+                    <div>
+                      <Label>Reason *</Label>
+                      <Textarea value={adjForm.reason} onChange={e => setAdjForm({ ...adjForm, reason: e.target.value })} placeholder="Explain adjustment reason..." required />
+                    </div>
+                    <Button type="submit" className="w-full">
+                      {isAdmin ? "Apply Adjustment" : "Submit for Approval"}
+                    </Button>
+                  </form>
 
-                  <Button type="submit" className="w-full">Add Product</Button>
-                </form>
-              </DialogContent>
-            </Dialog>
-          )}
-        </div>
+                  {adjustments.length > 0 && (
+                    <div className="mt-4 space-y-2 max-h-48 overflow-y-auto">
+                      <p className="text-sm font-semibold text-foreground">Recent Adjustments</p>
+                      {adjustments.map(adj => (
+                        <div key={adj.id} className="flex items-center justify-between text-sm border rounded-lg p-2">
+                          <div>
+                            <p className="font-medium text-foreground">{adj.product_name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {adj.adjustment_type === "increase" ? "+" : "-"}{adj.quantity} · {adj.reason}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Badge variant={adj.status === "approved" ? "default" : adj.status === "rejected" ? "destructive" : "secondary"}
+                              className={adj.status === "approved" ? "bg-success" : ""}>
+                              {adj.status}
+                            </Badge>
+                            {isAdmin && adj.status === "pending" && (
+                              <div className="flex gap-1">
+                                <Button size="sm" variant="ghost" className="h-6 text-xs text-success" onClick={() => handleApproveAdj(adj, true)}>✓</Button>
+                                <Button size="sm" variant="ghost" className="h-6 text-xs text-destructive" onClick={() => handleApproveAdj(adj, false)}>✗</Button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </DialogContent>
+              </Dialog>
+            )}
+            {canAddProduct && (
+              <Dialog open={open} onOpenChange={setOpen}>
+                <DialogTrigger asChild>
+                  <Button className="gap-2 gradient-bg border-0"><Plus className="h-4 w-4" /> Add Product</Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-md">
+                  <DialogHeader><DialogTitle>Add New Product</DialogTitle></DialogHeader>
+                  <form onSubmit={handleSubmit} className="space-y-4">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label>Product Name *</Label>
+                        <Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Wonder Aqua" required />
+                      </div>
+                      <div>
+                        <Label>Category / Size *</Label>
+                        <Input value={form.bottle_size} onChange={e => setForm({ ...form, bottle_size: e.target.value })} placeholder="e.g. 20L, 500ml" required />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label>Buying Price (KSh)</Label>
+                        <Input type="number" min={0} value={form.buying_price || ""} onChange={e => setForm({ ...form, buying_price: Number(e.target.value) })} required />
+                      </div>
+                      <div>
+                        <Label>Selling Price (KSh)</Label>
+                        <Input type="number" min={0} value={form.selling_price || ""} onChange={e => setForm({ ...form, selling_price: Number(e.target.value) })} required />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label>Initial Stock</Label>
+                        <Input type="number" min={0} value={form.quantity || ""} onChange={e => setForm({ ...form, quantity: Number(e.target.value) })} />
+                      </div>
+                      <div>
+                        <Label>Low Stock Threshold</Label>
+                        <Input type="number" min={0} value={form.low_stock_threshold || ""} onChange={e => setForm({ ...form, low_stock_threshold: Number(e.target.value) })} />
+                      </div>
+                    </div>
+                    <Button type="submit" className="w-full gradient-bg border-0">Add Product</Button>
+                  </form>
+                </DialogContent>
+              </Dialog>
+            )}
+          </div>
+        )}
       </div>
 
       {lowStockProducts.length > 0 && (
@@ -335,27 +293,21 @@ export default function Inventory() {
         </Card>
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {products.map(p => {
-            const pAny = p as any;
-            return (
-              <Card key={p.id} className={p.quantity <= p.low_stock_threshold ? "border-destructive/40" : ""}>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-base flex items-center justify-between">
-                    {p.name}
-                    <Badge variant={p.quantity <= p.low_stock_threshold ? "destructive" : "secondary"}>{p.quantity} sellable</Badge>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-1 text-sm">
-                  <p className="text-muted-foreground">Size: <span className="text-foreground font-medium">{p.bottle_size}</span></p>
-                  <p className="text-muted-foreground">Buy: <span className="text-foreground font-medium">KSh {p.buying_price}</span> · Sell: <span className="text-foreground font-medium">KSh {p.selling_price}</span></p>
-                  <p className="text-muted-foreground">Margin: <span className="text-success font-medium">KSh {p.selling_price - p.buying_price}</span></p>
-                  {(pAny.faulty_bottles > 0) && (
-                    <p className="text-destructive text-xs">Faulty: {pAny.faulty_bottles} bottles</p>
-                  )}
-                </CardContent>
-              </Card>
-            );
-          })}
+          {products.map(p => (
+            <Card key={p.id} className={`stat-card ${p.quantity <= p.low_stock_threshold ? "border-destructive/40" : ""}`}>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center justify-between">
+                  {p.name}
+                  <Badge variant={p.quantity <= p.low_stock_threshold ? "destructive" : "secondary"}>{p.quantity} in stock</Badge>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-1 text-sm">
+                <p className="text-muted-foreground">Size: <span className="text-foreground font-medium">{p.bottle_size}</span></p>
+                <p className="text-muted-foreground">Buy: <span className="text-foreground font-medium">KSh {p.buying_price}</span> · Sell: <span className="text-foreground font-medium">KSh {p.selling_price}</span></p>
+                <p className="text-muted-foreground">Margin: <span className="text-success font-medium">KSh {p.selling_price - p.buying_price}</span></p>
+              </CardContent>
+            </Card>
+          ))}
         </div>
       )}
 
@@ -370,9 +322,9 @@ export default function Inventory() {
                 <div key={log.id} className="flex items-center justify-between text-sm border-b pb-2 last:border-0">
                   <div>
                     <p className="font-medium text-foreground">{log.product_name}</p>
-                    <p className="text-xs text-muted-foreground">{log.reference} · {format(new Date(log.date), "dd MMM yyyy, HH:mm")}</p>
+                    <p className="text-xs text-muted-foreground">{log.reference}</p>
                   </div>
-                  <Badge variant={log.type === "IN" ? "default" : "secondary"} className={log.type === "IN" ? "bg-success" : ""}>
+                  <Badge variant={log.type === "IN" ? "default" : "destructive"} className={log.type === "IN" ? "bg-success" : ""}>
                     {log.type === "IN" ? "+" : "-"}{log.quantity}
                   </Badge>
                 </div>
