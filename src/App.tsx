@@ -25,16 +25,19 @@ import Assets from "@/pages/Assets";
 import Vouchers from "@/pages/Vouchers";
 import Production from "@/pages/Production";
 import Targets from "@/pages/Targets";
+import SystemControl from "@/pages/SystemControl";
 import NotFound from "@/pages/NotFound";
 import { Loader2 } from "lucide-react";
 
 const queryClient = new QueryClient();
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user, loading, isApproved } = useAuth();
+  const { user, loading, isApproved, profile } = useAuth();
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
+  if (loading) return <div className="min-h-screen flex items-center justify-center bg-background"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
   if (!user) return <Navigate to="/login" replace />;
+  // Wait for profile to be loaded before deciding
+  if (!profile) return <div className="min-h-screen flex items-center justify-center bg-background"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
   if (!isApproved) return <Navigate to="/pending" replace />;
 
   return <>{children}</>;
@@ -84,6 +87,7 @@ const App = () => (
                       <Route path="/vouchers" element={<RoleRoute allowed={[]}><Vouchers /></RoleRoute>} />
                       <Route path="/production" element={<RoleRoute allowed={["stock_manager"]}><Production /></RoleRoute>} />
                       <Route path="/targets" element={<RoleRoute allowed={[]}><Targets /></RoleRoute>} />
+                      <Route path="/system-control" element={<SystemControl />} />
                       <Route path="*" element={<NotFound />} />
                     </Routes>
                   </AppLayout>
