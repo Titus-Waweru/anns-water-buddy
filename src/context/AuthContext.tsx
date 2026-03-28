@@ -45,44 +45,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [branchId, setBranchId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchProfile = useCallback(async (userId: string) => {
-    const { data } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("user_id", userId)
-      .single();
-    if (data) setProfile(data as Profile);
-  }, []);
+  const fetchUserData = useCallback(async (userId: string) => {
+    // Fetch profile, roles, and branch in parallel — wait for ALL to complete before stopping loading
+    const [profileRes, rolesRes, branchRes] = await Promise.all([
+      supabase.from("profiles").select("*").eq("user_id", userId).single(),
+      supabase.from("user_roles").select("role").eq("user_id", userId),
+      supabase.from("user_branch_assignments").select("branch_id").eq("user_id", userId).limit(1).maybeSingle(),
+    ]);
 
-  const fetchRoles = useCallback(async (userId: string) => {
-    const { data } = await supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", userId);
-    if (data) setRoles(data.map(r => r.role as AppRole));
-  }, []);
-
-  const fetchBranch = useCallback(async (userId: string) => {
-    const { data } = await supabase
-      .from("user_branch_assignments")
-      .select("branch_id")
-      .eq("user_id", userId)
-      .limit(1)
-      .maybeSingle();
-    setBranchId(data?.branch_id || null);
+    if (profileRes.data) setProfile(profileRes.data as Profile);
+    if (rolesRes.data) setRoles(rolesRes.data.map(r => r.role as AppRole));
+    setBranchId(branchRes.data?.branch_id || null);
   }, []);
 
   useEffect(() => {
+    // Get initial session first
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      setSession(session);
+      setUser(session?.user ?? null);
+      if (session?.user) {
+        await fetchUserData(session.user.id);
+      }
+      setLoading(false);
+    });
+
+    // Then listen for changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
         setSession(session);
         setUser(session?.user ?? null);
         if (session?.user) {
-          setTimeout(() => {
-            fetchProfile(session.user.id);
-            fetchRoles(session.user.id);
-            fetchBranch(session.user.id);
-          }, 0);
+          await fetchUserData(session.user.id);
         } else {
           setProfile(null);
           setRoles([]);
@@ -92,19 +85,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     );
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchProfile(session.user.id);
-        fetchRoles(session.user.id);
-        fetchBranch(session.user.id);
-      }
-      setLoading(false);
-    });
-
     return () => subscription.unsubscribe();
-  }, [fetchProfile, fetchRoles, fetchBranch]);
+  }, [fetchUserData]);
 
   const signUp = async (email: string, password: string, fullName: string, phone?: string) => {
     const { error } = await supabase.auth.signUp({

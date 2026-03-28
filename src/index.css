@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
 @layer base {
   :root {
@@ -34,7 +34,7 @@
     --input: 210 20% 88%;
     --ring: 195 85% 55%;
 
-    --radius: 0.625rem;
+    --radius: 0.75rem;
 
     --gold: 42 80% 55%;
     --gold-foreground: 42 90% 20%;
@@ -53,6 +53,60 @@
     --sidebar-accent-foreground: 210 20% 94%;
     --sidebar-border: 220 50% 30%;
     --sidebar-ring: 195 85% 55%;
+
+    --glass: 0 0% 100% / 0.7;
+    --gradient-primary: linear-gradient(135deg, hsl(220 70% 22%), hsl(195 85% 55%));
+  }
+
+  .dark {
+    --background: 222 30% 8%;
+    --foreground: 210 20% 94%;
+
+    --card: 222 25% 12%;
+    --card-foreground: 210 20% 94%;
+
+    --popover: 222 25% 12%;
+    --popover-foreground: 210 20% 94%;
+
+    --primary: 195 85% 55%;
+    --primary-foreground: 220 70% 10%;
+
+    --secondary: 220 60% 30%;
+    --secondary-foreground: 210 20% 94%;
+
+    --muted: 222 20% 18%;
+    --muted-foreground: 210 15% 55%;
+
+    --accent: 220 50% 20%;
+    --accent-foreground: 195 85% 70%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 222 20% 20%;
+    --input: 222 20% 20%;
+    --ring: 195 85% 55%;
+
+    --gold: 42 80% 55%;
+    --gold-foreground: 42 90% 85%;
+
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 38 90% 85%;
+
+    --sidebar-background: 222 30% 6%;
+    --sidebar-foreground: 210 20% 85%;
+    --sidebar-primary: 195 85% 55%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 222 25% 15%;
+    --sidebar-accent-foreground: 210 20% 85%;
+    --sidebar-border: 222 20% 16%;
+    --sidebar-ring: 195 85% 55%;
+
+    --glass: 222 25% 12% / 0.8;
+    --gradient-primary: linear-gradient(135deg, hsl(195 85% 55%), hsl(220 70% 45%));
   }
 }
 
@@ -61,13 +115,53 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground font-sans;
+    @apply bg-background text-foreground font-sans antialiased;
     font-family: 'Inter', sans-serif;
   }
 }
 
 @layer utilities {
   .stat-card {
-    @apply bg-card rounded-xl border p-4 shadow-sm transition-shadow hover:shadow-md;
+    @apply bg-card rounded-xl border p-4 shadow-sm transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5;
   }
+
+  .glass-card {
+    @apply bg-card/80 backdrop-blur-md border border-border/50 rounded-xl shadow-lg;
+  }
+
+  .gradient-text {
+    @apply bg-clip-text text-transparent;
+    background-image: var(--gradient-primary);
+  }
+
+  .gradient-bg {
+    background-image: var(--gradient-primary);
+  }
+
+  .animate-fade-in {
+    animation: fadeIn 0.5s ease-out;
+  }
+
+  .animate-slide-up {
+    animation: slideUp 0.5s ease-out;
+  }
+
+  .animate-scale-in {
+    animation: scaleIn 0.3s ease-out;
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
 }
