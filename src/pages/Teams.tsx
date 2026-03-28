@@ -109,7 +109,11 @@ export default function Teams() {
     setActionLoading(null);
   };
 
+  const { isSuperAdmin } = useAuth();
+
   const filteredUsers = users.filter((u) => {
+    // Hide superadmins from non-superadmin users
+    if (!isSuperAdmin && u.roles.includes("superadmin")) return false;
     if (filter !== "all" && u.status !== filter) return false;
     if (search && !u.full_name.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
@@ -217,7 +221,7 @@ export default function Teams() {
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="none" disabled>No role</SelectItem>
-                            <SelectItem value="superadmin">Superadmin</SelectItem>
+                            {isSuperAdmin && <SelectItem value="superadmin">Superadmin</SelectItem>}
                             <SelectItem value="supervisor">Supervisor</SelectItem>
                             <SelectItem value="cashier">Cashier</SelectItem>
                             <SelectItem value="stock_manager">Stock Manager</SelectItem>
