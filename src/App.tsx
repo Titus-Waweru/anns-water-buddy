@@ -27,17 +27,26 @@ import Production from "@/pages/Production";
 import Targets from "@/pages/Targets";
 import SystemControl from "@/pages/SystemControl";
 import NotFound from "@/pages/NotFound";
-import { Loader2 } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const queryClient = new QueryClient();
+
+function LoadingSkeleton() {
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center bg-background p-6 gap-4">
+      <Skeleton className="h-12 w-12 rounded-xl" />
+      <Skeleton className="h-4 w-48" />
+      <Skeleton className="h-3 w-32" />
+    </div>
+  );
+}
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading, isApproved, profile } = useAuth();
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center bg-background"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
+  if (loading) return <LoadingSkeleton />;
   if (!user) return <Navigate to="/login" replace />;
-  // Wait for profile to be loaded before deciding
-  if (!profile) return <div className="min-h-screen flex items-center justify-center bg-background"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
+  if (!profile) return <LoadingSkeleton />;
   if (!isApproved) return <Navigate to="/pending" replace />;
 
   return <>{children}</>;
@@ -46,7 +55,6 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 /** Route guard for specific roles */
 function RoleRoute({ children, allowed }: { children: React.ReactNode; allowed: string[] }) {
   const { roles, isAdmin } = useAuth();
-  // Admins always pass
   if (isAdmin) return <>{children}</>;
   if (allowed.length > 0 && !roles.some(r => allowed.includes(r))) {
     return <div className="p-6 text-center text-muted-foreground">You don't have permission to access this page.</div>;
