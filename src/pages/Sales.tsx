@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useData } from "@/context/DataContext";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Plus, ShoppingCart, Printer } from "lucide-react";
+import { Plus, ShoppingCart, Printer, Smartphone } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import SaleReceipt from "@/components/SaleReceipt";
@@ -22,6 +22,9 @@ export default function Sales() {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const [receiptData, setReceiptData] = useState<any>(null);
+  const [hasDaraja, setHasDaraja] = useState(false);
+  const [mpesaPhone, setMpesaPhone] = useState("");
+  const [mpesaCode, setMpesaCode] = useState("");
   const [form, setForm] = useState({
     customerId: "",
     productId: "",
@@ -30,6 +33,12 @@ export default function Sales() {
     discountValue: 0,
     paymentMode: "Cash" as PaymentMode,
   });
+
+  // Check if Daraja is configured
+  useEffect(() => {
+    supabase.from("system_settings").select("setting_value").eq("setting_key", "mpesa_consumer_key").maybeSingle()
+      .then(({ data }) => { setHasDaraja(!!data?.setting_value); });
+  }, []);
 
   const selectedProduct = products.find(p => p.id === form.productId);
   const selectedCustomer = customers.find(c => c.id === form.customerId);
@@ -48,6 +57,12 @@ export default function Sales() {
     if (!selectedProduct || form.quantity < 1) return;
     if (form.quantity > selectedProduct.quantity) {
       toast.error("Not enough stock available");
+      return;
+    }
+
+    // For Mpesa manual mode, require transaction code
+    if (form.paymentMode === "Mpesa" && !hasDaraja && !mpesaCode.trim()) {
+      toast.error("Enter M-Pesa transaction code");
       return;
     }
 
@@ -79,12 +94,13 @@ export default function Sales() {
         points: loyaltyPoints,
         description: `Sale: ${selectedProduct.name} × ${form.quantity}`,
       });
-      await supabase.from("customers").update({
-        loyalty_points: (selectedCustomer?.loyalty_points || 0) + loyaltyPoints,
-      }).eq("id", form.customerId);
+      const newTotal = (selectedCustomer?.loyalty_points || 0) + loyaltyPoints;
+      await supabase.from("customers").update({ loyalty_points: newTotal }).eq("id", form.customerId);
     }
 
-    // Show receipt
+    const totalLoyalty = (selectedCustomer?.loyalty_points || 0) + loyaltyPoints;
+    const rewardMessage = totalLoyalty >= 100 ? "🎉 Eligible for loyalty reward!" : null;
+
     setReceiptData({
       id: crypto.randomUUID(),
       customerName: selectedCustomer?.name || "Walk-in",
@@ -97,17 +113,21 @@ export default function Sales() {
       paymentMode: form.paymentMode,
       profit,
       loyaltyPoints,
+      totalLoyaltyPoints: totalLoyalty,
+      rewardMessage,
+      mpesaCode: form.paymentMode === "Mpesa" ? mpesaCode : undefined,
       date: new Date().toISOString(),
     });
 
     toast.success("Sale recorded successfully!");
     setForm({ customerId: "", productId: "", quantity: 1, discountType: "fixed", discountValue: 0, paymentMode: "Cash" });
+    setMpesaPhone(""); setMpesaCode("");
     setOpen(false);
   };
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Sales</h1>
           <p className="text-sm text-muted-foreground">Record and track your sales</p>
@@ -116,7 +136,7 @@ export default function Sales() {
           <DialogTrigger asChild>
             <Button className="gap-2"><Plus className="h-4 w-4" /> New Sale</Button>
           </DialogTrigger>
-          <DialogContent className="max-w-md">
+          <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
             <DialogHeader><DialogTitle>Record Sale</DialogTitle></DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
@@ -158,6 +178,29 @@ export default function Sales() {
                   </Select>
                 </div>
               </div>
+
+              {/* M-Pesa fields */}
+              {form.paymentMode === "Mpesa" && (
+                <Card className="bg-primary/5 border-primary/20">
+                  <CardContent className="p-3 space-y-3">
+                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <Smartphone className="h-4 w-4 text-primary" />
+                      {hasDaraja ? "STK Push Available" : "Manual M-Pesa Entry"}
+                    </div>
+                    <div>
+                      <Label>Phone Number</Label>
+                      <Input value={mpesaPhone} onChange={e => setMpesaPhone(e.target.value)} placeholder="e.g. 254712345678" />
+                    </div>
+                    {!hasDaraja && (
+                      <div>
+                        <Label>Transaction Code *</Label>
+                        <Input value={mpesaCode} onChange={e => setMpesaCode(e.target.value.toUpperCase())} placeholder="e.g. QHL34D2K9R" className="font-mono" />
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label>Discount Type</Label>
@@ -182,6 +225,7 @@ export default function Sales() {
                     {discountAmount > 0 && <div className="flex justify-between text-destructive"><span>Discount</span><span>-KSh {discountAmount.toLocaleString()}</span></div>}
                     <div className="flex justify-between font-bold text-base border-t pt-1"><span>Total</span><span>KSh {finalAmount.toLocaleString()}</span></div>
                     <div className="flex justify-between text-success"><span>Profit</span><span>KSh {profit.toLocaleString()}</span></div>
+                    {form.customerId && <div className="flex justify-between text-primary text-xs border-t pt-1"><span>Loyalty Points</span><span>+{Math.floor(finalAmount / 100)} pts</span></div>}
                   </CardContent>
                 </Card>
               )}
@@ -215,11 +259,11 @@ export default function Sales() {
             <Card key={s.id}>
               <CardContent className="p-4">
                 <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-medium text-foreground">{s.product_name} × {s.quantity}</p>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium text-foreground truncate">{s.product_name} × {s.quantity}</p>
                     <p className="text-xs text-muted-foreground">{s.customer_name || "Walk-in"} · {format(new Date(s.date), "dd MMM yyyy, HH:mm")}</p>
                   </div>
-                  <div className="text-right flex items-center gap-2">
+                  <div className="text-right flex items-center gap-2 shrink-0">
                     <div>
                       <p className="font-bold text-foreground">KSh {s.final_amount.toLocaleString()}</p>
                       <div className="flex gap-1 justify-end">

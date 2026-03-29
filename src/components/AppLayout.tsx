@@ -1,12 +1,13 @@
 import { Link, useLocation } from "react-router-dom";
 import { useState, useEffect } from "react";
 import {
-  LayoutDashboard, Package, ShoppingCart, Truck, Users, Building, FileText, BarChart3, Menu, X, Droplets, LogOut,
-  DollarSign, Wrench, Receipt, Factory, Target, ShieldAlert,
+  LayoutDashboard, Package, ShoppingCart, Truck, Users, Building, FileText, BarChart3, Menu, X, LogOut,
+  DollarSign, Wrench, Receipt, Factory, Target, ShieldAlert, Timer, AlertTriangle,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import ThemeToggle from "@/components/ThemeToggle";
 import logo from "@/assets/logo.jpg";
 
@@ -14,7 +15,7 @@ interface NavItem {
   title: string;
   path: string;
   icon: any;
-  roles: string[]; // empty = all roles
+  roles: string[];
 }
 
 const allNavItems: NavItem[] = [
@@ -39,8 +40,9 @@ const allNavItems: NavItem[] = [
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { profile, signOut, roles, branchId } = useAuth();
+  const { profile, signOut, roles, branchId, isAdmin } = useAuth();
   const [branchName, setBranchName] = useState<string | null>(null);
+  const [countdown, setCountdown] = useState<number | null>(null);
 
   useEffect(() => {
     if (branchId) {
@@ -50,10 +52,23 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     }
   }, [branchId]);
 
+  // Fetch system countdown for non-superadmin
+  useEffect(() => {
+    supabase.from("system_settings").select("setting_value").eq("setting_key", "system_countdown_end").maybeSingle()
+      .then(({ data }) => {
+        if (data?.setting_value) {
+          const remaining = Math.max(0, Math.ceil((new Date(data.setting_value).getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
+          setCountdown(remaining);
+        }
+      });
+  }, []);
+
   const navItems = allNavItems.filter(item => {
     if (item.roles.length === 0) return true;
     return roles.some(r => item.roles.includes(r));
   });
+
+  const roleLabel = roles[0]?.replace("_", " ") || "user";
 
   return (
     <div className="min-h-screen flex">
@@ -99,8 +114,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 `}
               >
                 <item.icon className={`h-4 w-4 shrink-0 transition-colors ${isActive ? "text-sidebar-primary" : ""}`} />
-                {item.title}
-                {isActive && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-sidebar-primary" />}
+                <span className="truncate">{item.title}</span>
+                {isActive && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-sidebar-primary shrink-0" />}
               </Link>
             );
           })}
@@ -109,10 +124,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <div className="p-4 border-t border-sidebar-border space-y-3">
           {profile && (
             <div className="flex items-center gap-2">
-              <div className="h-7 w-7 rounded-full gradient-bg flex items-center justify-center text-xs font-bold text-primary-foreground">
+              <div className="h-7 w-7 rounded-full gradient-bg flex items-center justify-center text-xs font-bold text-primary-foreground shrink-0">
                 {profile.full_name?.[0]?.toUpperCase() || "?"}
               </div>
-              <p className="text-xs text-sidebar-foreground/70 truncate flex-1">{profile.full_name}</p>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs text-sidebar-foreground/70 truncate">{profile.full_name}</p>
+                <Badge variant="outline" className="text-[9px] uppercase tracking-wider mt-0.5">{roleLabel}</Badge>
+              </div>
             </div>
           )}
           {branchName && (
@@ -130,30 +148,55 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </aside>
 
       <div className="flex-1 flex flex-col min-h-screen min-w-0">
+        {/* Mobile header */}
         <header className="sticky top-0 z-30 glass-card border-b px-4 py-3 flex items-center gap-3 lg:hidden">
           <button onClick={() => setSidebarOpen(true)}>
             <Menu className="h-6 w-6 text-foreground" />
           </button>
-          <img src={logo} alt="Wonder Aqua" className="h-8 w-8 rounded-lg object-cover" />
+          <img src={logo} alt="Wonder Aqua" className="h-8 w-8 rounded-lg object-cover shrink-0" />
           <div className="min-w-0 flex-1">
-            <h1 className="font-bold text-sm text-foreground">Wonder Aqua LTD</h1>
-            {branchName && <p className="text-[10px] text-muted-foreground truncate">📍 {branchName}</p>}
+            <h1 className="font-bold text-sm text-foreground truncate">Wonder Aqua LTD</h1>
+            <div className="flex items-center gap-1.5">
+              {branchName && <p className="text-[10px] text-muted-foreground truncate">📍 {branchName}</p>}
+              <Badge variant="outline" className="text-[8px] uppercase shrink-0">{roleLabel}</Badge>
+            </div>
           </div>
           <ThemeToggle />
         </header>
 
         {/* Desktop top bar */}
-        <div className="hidden lg:flex items-center justify-between px-6 py-2.5 border-b bg-card/80 backdrop-blur-sm">
-          <div className="flex items-center gap-3 text-sm text-muted-foreground">
+        <div className="hidden lg:flex items-center justify-between px-6 py-2.5 border-b bg-card/80 backdrop-blur-sm sticky top-0 z-30">
+          <div className="flex items-center gap-3 text-sm">
             {branchName && <span className="font-medium text-foreground">📍 Branch: {branchName}</span>}
+            {profile && <span className="text-muted-foreground">· {profile.full_name}</span>}
           </div>
           <div className="flex items-center gap-3">
-            {roles.length > 0 && roles.map(r => (
+            {countdown !== null && countdown <= 7 && (
+              <div className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${countdown <= 3 ? "bg-destructive/10 text-destructive" : "bg-yellow-500/10 text-yellow-600"}`}>
+                <Timer className="h-3 w-3" />
+                {countdown === 0 ? "System expired" : `${countdown} days left`}
+              </div>
+            )}
+            {roles.map(r => (
               <span key={r} className="gradient-bg text-primary-foreground px-2.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider">{r.replace("_", " ")}</span>
             ))}
             <ThemeToggle />
           </div>
         </div>
+
+        {/* Countdown warning banner */}
+        {countdown !== null && countdown <= 3 && countdown > 0 && (
+          <div className="bg-destructive/10 border-b border-destructive/20 px-4 py-2 flex items-center gap-2 text-sm text-destructive">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            <span className="font-medium">System countdown: {countdown} day{countdown !== 1 ? "s" : ""} remaining. Contact admin to extend.</span>
+          </div>
+        )}
+        {countdown === 0 && (
+          <div className="bg-destructive text-destructive-foreground px-4 py-3 flex items-center gap-2 text-sm font-semibold">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            <span>System expired. Sales and inventory updates are restricted. Contact superadmin.</span>
+          </div>
+        )}
 
         <main className="flex-1 p-4 lg:p-6 max-w-6xl animate-fade-in">
           {children}
