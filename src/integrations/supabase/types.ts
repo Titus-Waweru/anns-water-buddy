@@ -296,6 +296,74 @@ export type Database = {
           },
         ]
       }
+      production_records: {
+        Row: {
+          bales: number
+          branch_id: string | null
+          created_at: string
+          economy_allocation: number
+          economy_bottles: number
+          economy_packs: number
+          executive_bottles: number
+          executive_packs: number
+          expected_revenue: number
+          faulty_bottles: number
+          good_bottles: number
+          id: string
+          loose_bottles: number
+          notes: string | null
+          production_date: string
+          recorded_by: string
+          total_bottles: number
+        }
+        Insert: {
+          bales?: number
+          branch_id?: string | null
+          created_at?: string
+          economy_allocation?: number
+          economy_bottles?: number
+          economy_packs?: number
+          executive_bottles?: number
+          executive_packs?: number
+          expected_revenue?: number
+          faulty_bottles?: number
+          good_bottles?: number
+          id?: string
+          loose_bottles?: number
+          notes?: string | null
+          production_date?: string
+          recorded_by: string
+          total_bottles?: number
+        }
+        Update: {
+          bales?: number
+          branch_id?: string | null
+          created_at?: string
+          economy_allocation?: number
+          economy_bottles?: number
+          economy_packs?: number
+          executive_bottles?: number
+          executive_packs?: number
+          expected_revenue?: number
+          faulty_bottles?: number
+          good_bottles?: number
+          id?: string
+          loose_bottles?: number
+          notes?: string | null
+          production_date?: string
+          recorded_by?: string
+          total_bottles?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "production_records_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       products: {
         Row: {
           bales: number
@@ -633,6 +701,36 @@ export type Database = {
           notes?: string | null
           phone?: string | null
           updated_at?: string
+        }
+        Relationships: []
+      }
+      system_settings: {
+        Row: {
+          created_at: string
+          id: string
+          is_encrypted: boolean
+          setting_key: string
+          setting_value: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_encrypted?: boolean
+          setting_key: string
+          setting_value?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_encrypted?: boolean
+          setting_key?: string
+          setting_value?: string
+          updated_at?: string
+          updated_by?: string | null
         }
         Relationships: []
       }
