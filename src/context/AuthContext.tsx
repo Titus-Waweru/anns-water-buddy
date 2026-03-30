@@ -133,11 +133,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await supabase.auth.signOut();
   };
 
-  const isApproved = profile?.status === "approved";
+  const isSuperAdmin = roles.includes("superadmin");
+  const isApproved = profile?.status === "approved" || isSuperAdmin;
   const hasRole = (role: AppRole) => roles.includes(role);
   const isAdmin = roles.includes("superadmin") || roles.includes("supervisor");
-  const isSuperAdmin = roles.includes("superadmin");
-
   return (
     <AuthContext.Provider value={{
       user, session, profile, roles, branchId, loading,
