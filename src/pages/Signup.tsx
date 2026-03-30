@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Loader2 } from "lucide-react";
 import { PasswordInput } from "@/components/PasswordInput";
+import OtpVerify from "@/components/OtpVerify";
 import logo from "@/assets/logo.jpg";
 
 export default function Signup() {
@@ -14,11 +15,11 @@ export default function Signup() {
   const { signUp } = useAuth();
   const [form, setForm] = useState({ email: "", password: "", fullName: "", phone: "" });
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState(false);
+  const [showOtp, setShowOtp] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   if (loading) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
-  if (user) return <Navigate to="/pending" replace />;
+  if (user && !showOtp) return <Navigate to="/pending" replace />;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,27 +28,16 @@ export default function Signup() {
     const { error } = await signUp(form.email, form.password, form.fullName, form.phone || undefined);
     if (error) {
       setError(error);
+      setSubmitting(false);
     } else {
-      setSuccess(true);
+      // Account created — verify email via OTP
+      setShowOtp(true);
+      setSubmitting(false);
     }
-    setSubmitting(false);
   };
 
-  if (success) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background p-4">
-        <Card className="w-full max-w-md">
-          <CardContent className="py-12 text-center space-y-4">
-            <img src={logo} alt="Wonder Aqua" className="h-16 w-16 rounded-xl object-cover mx-auto" />
-            <h2 className="text-xl font-bold text-foreground">Account Created!</h2>
-            <p className="text-muted-foreground">Please check your email to verify your account, then wait for supervisor approval before you can access the system.</p>
-            <Link to="/login">
-              <Button variant="outline" className="mt-4">Back to Login</Button>
-            </Link>
-          </CardContent>
-        </Card>
-      </div>
-    );
+  if (showOtp) {
+    return <OtpVerify email={form.email} type="signup" onBack={() => setShowOtp(false)} />;
   }
 
   return (
