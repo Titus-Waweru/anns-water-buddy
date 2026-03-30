@@ -59,8 +59,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     if (!user) return;
     setLoading(true);
 
-    // Build branch-filtered queries - superadmin/supervisor see all, others see their branch
-    const shouldFilter = !isSuperAdmin && !isAdmin && branchId;
+    // Branch filter: non-admin users only see their branch data
+    const shouldFilter = !isSuperAdmin && !isAdmin && !!branchId;
 
     let prodQ = supabase.from("products").select("*").order("created_at", { ascending: false });
     let custQ = supabase.from("customers").select("*").order("created_at", { ascending: false });

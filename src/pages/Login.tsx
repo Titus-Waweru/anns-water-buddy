@@ -5,7 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Droplets, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
+import { PasswordInput } from "@/components/PasswordInput";
 import logo from "@/assets/logo.jpg";
 
 export default function Login() {
@@ -50,7 +51,7 @@ export default function Login() {
             </div>
             <div>
               <Label>Password</Label>
-              <Input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" required />
+              <PasswordInput value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" required />
             </div>
             <Button type="submit" className="w-full" disabled={submitting}>
               {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
