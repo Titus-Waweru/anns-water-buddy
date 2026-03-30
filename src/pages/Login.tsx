@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Loader2 } from "lucide-react";
 import { PasswordInput } from "@/components/PasswordInput";
+import OtpVerify from "@/components/OtpVerify";
 import logo from "@/assets/logo.jpg";
 
 export default function Login() {
@@ -16,19 +17,30 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [showOtp, setShowOtp] = useState(false);
 
   if (loading) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
   if (user && isApproved) return <Navigate to="/app" replace />;
-  if (user && !isApproved) return <Navigate to="/pending" replace />;
+  if (user && !isApproved && !showOtp) return <Navigate to="/pending" replace />;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setSubmitting(true);
     const { error } = await signIn(email, password);
-    if (error) setError(error);
-    setSubmitting(false);
+    if (error) {
+      setError(error);
+      setSubmitting(false);
+    } else {
+      // Credentials valid — now verify with OTP
+      setShowOtp(true);
+      setSubmitting(false);
+    }
   };
+
+  if (showOtp) {
+    return <OtpVerify email={email} type="login" onBack={() => setShowOtp(false)} />;
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
