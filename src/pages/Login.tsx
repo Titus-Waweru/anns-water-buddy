@@ -11,7 +11,7 @@ import OtpVerify from "@/components/OtpVerify";
 import logo from "@/assets/logo.jpg";
 
 export default function Login() {
-  const { user, loading, isApproved } = useAuth();
+  const { user, loading, isApproved, profile } = useAuth();
   const { signIn } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -20,8 +20,10 @@ export default function Login() {
   const [showOtp, setShowOtp] = useState(false);
 
   if (loading) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
-  if (user && isApproved) return <Navigate to="/app" replace />;
-  if (user && !isApproved && !showOtp) return <Navigate to="/pending" replace />;
+
+  // Only redirect if we have profile loaded (prevents wrong redirect)
+  if (user && profile && isApproved && !showOtp) return <Navigate to="/app" replace />;
+  if (user && profile && !isApproved && !showOtp) return <Navigate to="/pending" replace />;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
