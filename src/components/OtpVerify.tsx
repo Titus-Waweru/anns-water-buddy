@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Loader2, ShieldCheck, RotateCcw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/context/AuthContext";
 import logo from "@/assets/logo.jpg";
 
 interface OtpVerifyProps {
@@ -13,10 +14,12 @@ interface OtpVerifyProps {
 }
 
 export default function OtpVerify({ email, type, onBack }: OtpVerifyProps) {
+  const { refreshProfile, profile, isApproved } = useAuth();
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
   const [verifying, setVerifying] = useState(false);
+  const [verified, setVerified] = useState(false);
   const [cooldown, setCooldown] = useState(0);
   const [sent, setSent] = useState(false);
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
@@ -33,6 +36,19 @@ export default function OtpVerify({ email, type, onBack }: OtpVerifyProps) {
     return () => clearTimeout(t);
   }, [cooldown]);
 
+  // After OTP verified, wait for profile to load then navigate
+  useEffect(() => {
+    if (!verified) return;
+    // Profile loaded — navigate based on approval status
+    if (profile) {
+      if (type === "signup" || !isApproved) {
+        window.location.href = "/pending";
+      } else {
+        window.location.href = "/app";
+      }
+    }
+  }, [verified, profile, isApproved, type]);
+
   const generateOtp = () => {
     return Math.floor(100000 + Math.random() * 900000).toString();
   };
@@ -46,7 +62,7 @@ export default function OtpVerify({ email, type, onBack }: OtpVerifyProps) {
       const otpData = { code, email, expiresAt: Date.now() + 5 * 60 * 1000 };
       localStorage.setItem("wa_otp", JSON.stringify(otpData));
 
-      const { data, error: fnError } = await supabase.functions.invoke("send-otp-email", {
+      const { error: fnError } = await supabase.functions.invoke("send-otp-email", {
         body: { email, otp: code, type },
       });
 
@@ -70,12 +86,10 @@ export default function OtpVerify({ email, type, onBack }: OtpVerifyProps) {
     newOtp[index] = value.slice(-1);
     setOtp(newOtp);
 
-    // Auto-focus next input
     if (value && index < 5) {
       inputRefs.current[index + 1]?.focus();
     }
 
-    // Auto-verify when all 6 digits entered
     if (newOtp.every(d => d !== "") && newOtp.join("").length === 6) {
       verifyOtp(newOtp.join(""));
     }
@@ -132,16 +146,9 @@ export default function OtpVerify({ email, type, onBack }: OtpVerifyProps) {
       // OTP verified — clean up
       localStorage.removeItem("wa_otp");
 
-      // Mark email as confirmed if signup, or just let the auth flow continue
-      // The auth state change listener in AuthContext will handle navigation
-      if (type === "signup") {
-        // For signup, we trigger the confirmation by calling supabase verify
-        // Since Supabase already created the user, just redirect
-        window.location.href = "/pending";
-      } else {
-        // For login, the user is already signed in from the login step
-        window.location.href = "/app";
-      }
+      // Refresh profile to get latest approval status before navigating
+      await refreshProfile();
+      setVerified(true);
     } catch (err) {
       setError("Verification failed. Please try again.");
     } finally {
@@ -174,6 +181,11 @@ export default function OtpVerify({ email, type, onBack }: OtpVerifyProps) {
           {sending && !sent ? (
             <div className="flex justify-center py-4">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+          ) : verified ? (
+            <div className="flex flex-col items-center gap-2 py-4">
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              <p className="text-sm text-muted-foreground">Verified! Redirecting...</p>
             </div>
           ) : (
             <>

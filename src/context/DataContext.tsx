@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/context/AuthContext";
 import type { Database } from "@/integrations/supabase/types";
@@ -18,6 +18,7 @@ interface DataContextType {
   purchases: DbPurchase[];
   inventoryLogs: DbInventoryLog[];
   loading: boolean;
+  error: string | null;
 
   addProduct: (p: Database["public"]["Tables"]["products"]["Insert"]) => Promise<void>;
   updateProduct: (p: Database["public"]["Tables"]["products"]["Update"] & { id: string }) => Promise<void>;
@@ -45,6 +46,21 @@ export function useData() {
   return ctx;
 }
 
+const FETCH_TIMEOUT_MS = 7000;
+const MAX_RETRIES = 2;
+
+async function fetchWithTimeout<T>(
+  fn: () => Promise<T>,
+  timeoutMs = FETCH_TIMEOUT_MS
+): Promise<T> {
+  return Promise.race([
+    fn(),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("Request timeout")), timeoutMs)
+    ),
+  ]);
+}
+
 export function DataProvider({ children }: { children: React.ReactNode }) {
   const { user, isAdmin, isSuperAdmin, branchId } = useAuth();
   const [products, setProducts] = useState<DbProduct[]>([]);
@@ -54,39 +70,57 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [purchases, setPurchases] = useState<DbPurchase[]>([]);
   const [inventoryLogs, setInventoryLogs] = useState<DbInventoryLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const retryCount = useRef(0);
 
   const fetchAll = useCallback(async () => {
     if (!user) return;
     setLoading(true);
+    setError(null);
 
     // Branch filter: non-admin users only see their branch data
     const shouldFilter = !isSuperAdmin && !isAdmin && !!branchId;
 
-    let prodQ = supabase.from("products").select("*").order("created_at", { ascending: false });
-    let custQ = supabase.from("customers").select("*").order("created_at", { ascending: false });
-    let suppQ = supabase.from("suppliers").select("*").order("created_at", { ascending: false });
-    let saleQ = supabase.from("sales").select("*").order("date", { ascending: false });
-    let purchQ = supabase.from("purchases").select("*").order("date", { ascending: false });
-    let logQ = supabase.from("inventory_logs").select("*").order("date", { ascending: false });
+    try {
+      const result = await fetchWithTimeout(async () => {
+        let prodQ = supabase.from("products").select("*").order("created_at", { ascending: false });
+        let custQ = supabase.from("customers").select("*").order("created_at", { ascending: false });
+        let suppQ = supabase.from("suppliers").select("*").order("created_at", { ascending: false });
+        let saleQ = supabase.from("sales").select("*").order("date", { ascending: false });
+        let purchQ = supabase.from("purchases").select("*").order("date", { ascending: false });
+        let logQ = supabase.from("inventory_logs").select("*").order("date", { ascending: false });
 
-    if (shouldFilter) {
-      prodQ = prodQ.eq("branch_id", branchId);
-      custQ = custQ.eq("branch_id", branchId);
-      saleQ = saleQ.eq("branch_id", branchId);
-      purchQ = purchQ.eq("branch_id", branchId);
-      logQ = logQ.eq("branch_id", branchId);
+        if (shouldFilter) {
+          prodQ = prodQ.eq("branch_id", branchId);
+          custQ = custQ.eq("branch_id", branchId);
+          saleQ = saleQ.eq("branch_id", branchId);
+          purchQ = purchQ.eq("branch_id", branchId);
+          logQ = logQ.eq("branch_id", branchId);
+        }
+
+        return Promise.all([prodQ, custQ, suppQ, saleQ, purchQ, logQ]);
+      });
+
+      const [prodRes, custRes, suppRes, saleRes, purchRes, logRes] = result;
+      if (prodRes.data) setProducts(prodRes.data);
+      if (custRes.data) setCustomers(custRes.data);
+      if (suppRes.data) setSuppliers(suppRes.data);
+      if (saleRes.data) setSales(saleRes.data);
+      if (purchRes.data) setPurchases(purchRes.data);
+      if (logRes.data) setInventoryLogs(logRes.data);
+      retryCount.current = 0;
+    } catch (err) {
+      console.error("DataContext fetch error:", err);
+      if (retryCount.current < MAX_RETRIES) {
+        retryCount.current++;
+        // Retry after 1 second
+        setTimeout(() => fetchAll(), 1000);
+        return;
+      }
+      setError("Failed to load data. Please refresh the page.");
+    } finally {
+      setLoading(false);
     }
-
-    const [prodRes, custRes, suppRes, saleRes, purchRes, logRes] = await Promise.all([
-      prodQ, custQ, suppQ, saleQ, purchQ, logQ,
-    ]);
-    if (prodRes.data) setProducts(prodRes.data);
-    if (custRes.data) setCustomers(custRes.data);
-    if (suppRes.data) setSuppliers(suppRes.data);
-    if (saleRes.data) setSales(saleRes.data);
-    if (purchRes.data) setPurchases(purchRes.data);
-    if (logRes.data) setInventoryLogs(logRes.data);
-    setLoading(false);
   }, [user, isSuperAdmin, isAdmin, branchId]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
@@ -157,6 +191,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       quantity: s.quantity,
       reference: `Sale to ${s.customer_name || "Walk-in"}`,
       date: s.date || new Date().toISOString(),
+      branch_id: s.branch_id || branchId,
     });
 
     // Update customer credit if credit sale
@@ -170,7 +205,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     }
 
     fetchAll();
-  }, [fetchAll, products, customers]);
+  }, [fetchAll, products, customers, branchId]);
 
   const addPurchase = useCallback(async (p: Database["public"]["Tables"]["purchases"]["Insert"]) => {
     const { error } = await supabase.from("purchases").insert(p);
@@ -193,14 +228,15 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       quantity: p.quantity,
       reference: `Purchase from ${p.supplier_name}`,
       date: p.date || new Date().toISOString(),
+      branch_id: p.branch_id || branchId,
     });
 
     fetchAll();
-  }, [fetchAll, products]);
+  }, [fetchAll, products, branchId]);
 
   return (
     <DataContext.Provider value={{
-      products, customers, suppliers, sales, purchases, inventoryLogs, loading,
+      products, customers, suppliers, sales, purchases, inventoryLogs, loading, error,
       addProduct, updateProduct, deleteProduct,
       addCustomer, updateCustomer, deleteCustomer,
       addSupplier, updateSupplier, deleteSupplier,
