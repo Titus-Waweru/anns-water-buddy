@@ -113,20 +113,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Single auth listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, s) => {
+      (_event, s) => {
         if (!mounted) return;
         setSession(s);
         setUser(s?.user ?? null);
 
         if (s?.user) {
-          // Always reset and re-fetch on auth change to avoid stale data
+          // Fire and forget — never await inside onAuthStateChange
           fetchingRef.current = false;
-          await fetchUserData(s.user.id);
+          fetchUserData(s.user.id).then(() => {
+            clearTimeout(timeoutRef.current);
+            if (mounted) setLoading(false);
+          });
         } else {
           clearUserState();
+          clearTimeout(timeoutRef.current);
+          if (mounted) setLoading(false);
         }
-        clearTimeout(timeoutRef.current);
-        if (mounted) setLoading(false);
       }
     );
 
