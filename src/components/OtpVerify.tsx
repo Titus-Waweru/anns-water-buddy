@@ -123,11 +123,18 @@ export default function OtpVerify({ email, type, onBack }: OtpVerifyProps) {
     setVerifying(true);
     setError("");
 
+    // Failsafe timeout — never hang forever
+    const failsafe = setTimeout(() => {
+      setVerifying(false);
+      setError("Verification timed out. Please try again.");
+    }, 10000);
+
     try {
       const stored = localStorage.getItem("wa_otp");
       if (!stored) {
         setError("Verification session expired. Please request a new code.");
         setVerifying(false);
+        clearTimeout(failsafe);
         return;
       }
 
@@ -135,12 +142,14 @@ export default function OtpVerify({ email, type, onBack }: OtpVerifyProps) {
       if (otpData.email !== email) {
         setError("Email mismatch. Please request a new code.");
         setVerifying(false);
+        clearTimeout(failsafe);
         return;
       }
       if (Date.now() > otpData.expiresAt) {
         setError("Code expired. Please request a new code.");
         localStorage.removeItem("wa_otp");
         setVerifying(false);
+        clearTimeout(failsafe);
         return;
       }
       if (otpData.code !== code) {
@@ -148,18 +157,28 @@ export default function OtpVerify({ email, type, onBack }: OtpVerifyProps) {
         setOtp(["", "", "", "", "", ""]);
         inputRefs.current[0]?.focus();
         setVerifying(false);
+        clearTimeout(failsafe);
         return;
       }
 
       // OTP verified — clean up
       localStorage.removeItem("wa_otp");
+      console.log("OTP verified successfully for:", email);
 
-      // Refresh profile to get latest approval status before navigating
-      await refreshProfile();
+      // Try refreshing profile but don't block on it
+      try {
+        await refreshProfile();
+      } catch (e) {
+        console.warn("Profile refresh after OTP failed, proceeding anyway:", e);
+      }
+
+      clearTimeout(failsafe);
       setVerified(true);
+      setVerifying(false);
     } catch (err) {
+      clearTimeout(failsafe);
+      console.error("OTP verification error:", err);
       setError("Verification failed. Please try again.");
-    } finally {
       setVerifying(false);
     }
   };
