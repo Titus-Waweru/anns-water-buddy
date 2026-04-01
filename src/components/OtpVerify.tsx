@@ -36,17 +36,25 @@ export default function OtpVerify({ email, type, onBack }: OtpVerifyProps) {
     return () => clearTimeout(t);
   }, [cooldown]);
 
-  // After OTP verified, wait for profile to load then navigate
+  // After OTP verified, redirect with a short delay (don't wait on profile)
   useEffect(() => {
     if (!verified) return;
-    // Profile loaded — navigate based on approval status
-    if (profile) {
-      if (type === "signup" || !isApproved) {
+
+    // Give profile a moment to load, but don't wait forever
+    const redirectTimeout = setTimeout(() => {
+      if (type === "signup") {
+        window.location.href = "/pending";
+      } else if (profile && isApproved) {
+        window.location.href = "/app";
+      } else if (profile && !isApproved) {
         window.location.href = "/pending";
       } else {
+        // Profile not loaded yet — default redirect
         window.location.href = "/app";
       }
-    }
+    }, 1500);
+
+    return () => clearTimeout(redirectTimeout);
   }, [verified, profile, isApproved, type]);
 
   const generateOtp = () => {
