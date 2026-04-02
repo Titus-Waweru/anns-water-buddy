@@ -28,6 +28,8 @@ import Production from "@/pages/Production";
 import Targets from "@/pages/Targets";
 import SystemControl from "@/pages/SystemControl";
 import NotFound from "@/pages/NotFound";
+import ForgotPassword from "@/pages/ForgotPassword";
+import ResetPassword from "@/pages/ResetPassword";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const queryClient = new QueryClient({
@@ -48,6 +50,27 @@ function LoadingSkeleton() {
       <Skeleton className="h-3 w-32" />
     </div>
   );
+}
+
+/** Smart landing: if installed as PWA, skip landing page */
+function SmartLanding() {
+  const { user, loading, isApproved, profile } = useAuth();
+  const isStandalone = window.matchMedia("(display-mode: standalone)").matches
+    || (window.navigator as any).standalone === true;
+
+  if (loading) return <LoadingSkeleton />;
+
+  // In standalone (installed) mode, never show landing page
+  if (isStandalone) {
+    if (user && profile && isApproved) return <Navigate to="/app" replace />;
+    return <Navigate to="/login" replace />;
+  }
+
+  // If logged in on web, redirect to app
+  if (user && profile && isApproved) return <Navigate to="/app" replace />;
+  if (user && profile && !isApproved) return <Navigate to="/pending" replace />;
+
+  return <LandingPage />;
 }
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -81,9 +104,11 @@ const App = () => (
         <BrowserRouter>
           <AuthProvider>
             <Routes>
-              <Route path="/" element={<LandingPage />} />
+              <Route path="/" element={<SmartLanding />} />
               <Route path="/login" element={<Login />} />
               <Route path="/signup" element={<Signup />} />
+              <Route path="/forgot-password" element={<ForgotPassword />} />
+              <Route path="/reset-password" element={<ResetPassword />} />
               <Route path="/pending" element={<PendingApproval />} />
 
               <Route path="/app/*" element={
