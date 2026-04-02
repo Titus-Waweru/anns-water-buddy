@@ -52,7 +52,7 @@ function LoadingSkeleton() {
   );
 }
 
-/** Smart landing: if installed as PWA, skip landing page */
+/** Smart landing: if installed as PWA, skip landing page — always defined */
 function SmartLanding() {
   const { user, loading, isApproved, profile } = useAuth();
   const isStandalone = window.matchMedia("(display-mode: standalone)").matches
