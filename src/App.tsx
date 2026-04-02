@@ -28,6 +28,8 @@ import Production from "@/pages/Production";
 import Targets from "@/pages/Targets";
 import SystemControl from "@/pages/SystemControl";
 import NotFound from "@/pages/NotFound";
+import ForgotPassword from "@/pages/ForgotPassword";
+import ResetPassword from "@/pages/ResetPassword";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const queryClient = new QueryClient({
