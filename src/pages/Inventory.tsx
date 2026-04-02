@@ -8,9 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { AlertTriangle, Plus, Package, ClipboardCheck } from "lucide-react";
+import { AlertTriangle, Plus, Package, ClipboardCheck, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 interface StockAdj {
@@ -25,15 +25,18 @@ interface StockAdj {
 }
 
 export default function Inventory() {
-  const { products, addProduct, inventoryLogs, refetch } = useData();
+  const { products, addProduct, updateProduct, deleteProduct, inventoryLogs, refetch } = useData();
   const { user, isAdmin, hasRole, branchId, roles } = useAuth();
   const [open, setOpen] = useState(false);
   const [adjOpen, setAdjOpen] = useState(false);
   const [adjustments, setAdjustments] = useState<StockAdj[]>([]);
+  const [editProduct, setEditProduct] = useState<any>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   const isCashier = roles.includes("cashier") && !isAdmin;
   const canAddProduct = isAdmin || hasRole("stock_manager");
   const canAdjust = isAdmin || hasRole("stock_manager");
+  const canEdit = isAdmin; // supervisor or superadmin
 
   const [form, setForm] = useState({
     name: "", bottle_size: "", buying_price: 0, selling_price: 0, quantity: 0,
@@ -44,18 +47,50 @@ export default function Inventory() {
     productId: "", adjustmentType: "increase" as "increase" | "decrease", quantity: 0, reason: "",
   });
 
+  const resetForm = () => setForm({ name: "", bottle_size: "", buying_price: 0, selling_price: 0, quantity: 0, low_stock_threshold: 5 });
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name.trim() || !form.bottle_size.trim()) return;
-
-    await addProduct({
-      ...form,
-      branch_id: branchId,
-    } as any);
-
-    setForm({ name: "", bottle_size: "", buying_price: 0, selling_price: 0, quantity: 0, low_stock_threshold: 5 });
+    await addProduct({ ...form, branch_id: branchId } as any);
+    resetForm();
     setOpen(false);
     toast.success("Product added!");
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editProduct) return;
+    await updateProduct({
+      id: editProduct.id,
+      name: form.name,
+      bottle_size: form.bottle_size,
+      buying_price: form.buying_price,
+      selling_price: form.selling_price,
+      quantity: form.quantity,
+      low_stock_threshold: form.low_stock_threshold,
+    });
+    toast.success("Product updated!");
+    setEditProduct(null);
+    resetForm();
+  };
+
+  const handleDelete = async (id: string) => {
+    await deleteProduct(id);
+    toast.success("Product deleted!");
+    setDeleteConfirm(null);
+  };
+
+  const openEdit = (p: any) => {
+    setForm({
+      name: p.name,
+      bottle_size: p.bottle_size,
+      buying_price: p.buying_price,
+      selling_price: p.selling_price,
+      quantity: p.quantity,
+      low_stock_threshold: p.low_stock_threshold,
+    });
+    setEditProduct(p);
   };
 
   const fetchAdjustments = async () => {
@@ -294,11 +329,15 @@ export default function Inventory() {
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {products.map(p => (
-            <Card key={p.id} className={`stat-card ${p.quantity <= p.low_stock_threshold ? "border-destructive/40" : ""}`}>
+            <Card key={p.id} className={`stat-card cursor-pointer hover:shadow-md transition-shadow ${p.quantity <= p.low_stock_threshold ? "border-destructive/40" : ""}`}
+              onClick={() => canEdit && openEdit(p)}>
               <CardHeader className="pb-2">
                 <CardTitle className="text-base flex items-center justify-between">
                   {p.name}
-                  <Badge variant={p.quantity <= p.low_stock_threshold ? "destructive" : "secondary"}>{p.quantity} in stock</Badge>
+                  <div className="flex items-center gap-2">
+                    <Badge variant={p.quantity <= p.low_stock_threshold ? "destructive" : "secondary"}>{p.quantity} in stock</Badge>
+                    {canEdit && <Pencil className="h-3.5 w-3.5 text-muted-foreground" />}
+                  </div>
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-1 text-sm">
@@ -310,6 +349,45 @@ export default function Inventory() {
           ))}
         </div>
       )}
+
+      {/* Edit Product Dialog */}
+      <Dialog open={!!editProduct} onOpenChange={o => { if (!o) { setEditProduct(null); resetForm(); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Edit Product</DialogTitle></DialogHeader>
+          <form onSubmit={handleEditSubmit} className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Name *</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></div>
+              <div><Label>Size *</Label><Input value={form.bottle_size} onChange={e => setForm({ ...form, bottle_size: e.target.value })} required /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Buying Price</Label><Input type="number" min={0} value={form.buying_price || ""} onChange={e => setForm({ ...form, buying_price: Number(e.target.value) })} /></div>
+              <div><Label>Selling Price</Label><Input type="number" min={0} value={form.selling_price || ""} onChange={e => setForm({ ...form, selling_price: Number(e.target.value) })} /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Quantity</Label><Input type="number" min={0} value={form.quantity} onChange={e => setForm({ ...form, quantity: Number(e.target.value) })} /></div>
+              <div><Label>Low Stock Threshold</Label><Input type="number" min={0} value={form.low_stock_threshold} onChange={e => setForm({ ...form, low_stock_threshold: Number(e.target.value) })} /></div>
+            </div>
+            <div className="flex gap-2">
+              <Button type="submit" className="flex-1">Save Changes</Button>
+              <Button type="button" variant="destructive" className="gap-1" onClick={() => setDeleteConfirm(editProduct?.id)}>
+                <Trash2 className="h-4 w-4" /> Delete
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation */}
+      <Dialog open={!!deleteConfirm} onOpenChange={o => { if (!o) setDeleteConfirm(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Delete Product?</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">This action cannot be undone. All related data will remain but the product will be removed.</p>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setDeleteConfirm(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => { handleDelete(deleteConfirm!); setEditProduct(null); }}>Delete</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {inventoryLogs.length > 0 && (
         <Card>

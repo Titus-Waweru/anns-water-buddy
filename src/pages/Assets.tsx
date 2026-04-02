@@ -7,9 +7,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Plus, Wrench, Loader2 } from "lucide-react";
+import { Plus, Wrench, Loader2, Pencil, Trash2 } from "lucide-react";
 
 interface Asset {
   id: string;
@@ -31,6 +31,8 @@ export default function AssetsPage() {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
+  const [editAsset, setEditAsset] = useState<Asset | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [form, setForm] = useState({ name: "", description: "", category: "equipment", value: 0, status: "active" });
 
   const fetchAssets = async () => {
@@ -44,30 +46,41 @@ export default function AssetsPage() {
 
   useEffect(() => { fetchAssets(); }, [isAdmin, branchId]);
 
+  const resetForm = () => setForm({ name: "", description: "", category: "equipment", value: 0, status: "active" });
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name.trim()) return;
     const { error } = await supabase.from("assets").insert({
-      name: form.name,
-      description: form.description || null,
-      category: form.category,
-      value: form.value,
-      status: form.status,
-      branch_id: branchId,
+      name: form.name, description: form.description || null,
+      category: form.category, value: form.value, status: form.status, branch_id: branchId,
     } as any);
     if (error) toast.error("Failed to add asset");
-    else {
-      toast.success("Asset added!");
-      setForm({ name: "", description: "", category: "equipment", value: 0, status: "active" });
-      setOpen(false);
-      fetchAssets();
-    }
+    else { toast.success("Asset added!"); resetForm(); setOpen(false); fetchAssets(); }
   };
 
-  const updateStatus = async (id: string, status: string) => {
-    await supabase.from("assets").update({ status } as any).eq("id", id);
-    toast.success("Status updated");
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editAsset) return;
+    const { error } = await supabase.from("assets").update({
+      name: form.name, description: form.description || null,
+      category: form.category, value: form.value, status: form.status,
+    } as any).eq("id", editAsset.id);
+    if (error) toast.error("Failed to update asset");
+    else { toast.success("Asset updated!"); setEditAsset(null); resetForm(); fetchAssets(); }
+  };
+
+  const handleDelete = async (id: string) => {
+    await supabase.from("assets").delete().eq("id", id);
+    toast.success("Asset deleted!");
+    setDeleteConfirm(null);
+    setEditAsset(null);
     fetchAssets();
+  };
+
+  const openEdit = (a: Asset) => {
+    setForm({ name: a.name, description: a.description || "", category: a.category, value: a.value, status: a.status });
+    setEditAsset(a);
   };
 
   const totalValue = assets.filter(a => a.status === "active").reduce((s, a) => s + Number(a.value), 0);
@@ -87,28 +100,17 @@ export default function AssetsPage() {
             <DialogContent>
               <DialogHeader><DialogTitle>Add Asset</DialogTitle></DialogHeader>
               <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <Label>Name *</Label>
-                  <Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Delivery Bodaboda" required />
-                </div>
-                <div>
-                  <Label>Description</Label>
-                  <Input value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Details..." />
-                </div>
+                <div><Label>Name *</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Delivery Bodaboda" required /></div>
+                <div><Label>Description</Label><Input value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Details..." /></div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <Label>Category</Label>
                     <Select value={form.category} onValueChange={v => setForm({ ...form, category: v })}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {CATEGORIES.map(c => <SelectItem key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</SelectItem>)}
-                      </SelectContent>
+                      <SelectContent>{CATEGORIES.map(c => <SelectItem key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</SelectItem>)}</SelectContent>
                     </Select>
                   </div>
-                  <div>
-                    <Label>Value (KSh)</Label>
-                    <Input type="number" min={0} value={form.value || ""} onChange={e => setForm({ ...form, value: Number(e.target.value) })} />
-                  </div>
+                  <div><Label>Value (KSh)</Label><Input type="number" min={0} value={form.value || ""} onChange={e => setForm({ ...form, value: Number(e.target.value) })} /></div>
                 </div>
                 <Button type="submit" className="w-full">Add Asset</Button>
               </form>
@@ -136,34 +138,75 @@ export default function AssetsPage() {
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {assets.map(a => (
-            <Card key={a.id}>
+            <Card key={a.id} className={`cursor-pointer hover:shadow-md transition-shadow ${isAdmin ? "" : ""}`}
+              onClick={() => isAdmin && openEdit(a)}>
               <CardHeader className="pb-2">
                 <CardTitle className="text-base flex items-center justify-between">
                   {a.name}
-                  <Badge variant={a.status === "active" ? "default" : a.status === "maintenance" ? "secondary" : "destructive"}
-                    className={a.status === "active" ? "bg-success" : ""}>
-                    {a.status}
-                  </Badge>
+                  <div className="flex items-center gap-2">
+                    <Badge variant={a.status === "active" ? "default" : a.status === "maintenance" ? "secondary" : "destructive"}
+                      className={a.status === "active" ? "bg-success" : ""}>
+                      {a.status}
+                    </Badge>
+                    {isAdmin && <Pencil className="h-3.5 w-3.5 text-muted-foreground" />}
+                  </div>
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-1 text-sm">
                 <p className="text-muted-foreground">Category: <span className="text-foreground font-medium capitalize">{a.category}</span></p>
                 <p className="text-muted-foreground">Value: <span className="text-foreground font-medium">KSh {Number(a.value).toLocaleString()}</span></p>
                 {a.description && <p className="text-muted-foreground text-xs">{a.description}</p>}
-                {isAdmin && (
-                  <div className="flex gap-1 pt-2">
-                    {STATUSES.filter(s => s !== a.status).map(s => (
-                      <Button key={s} size="sm" variant="outline" className="text-xs h-7" onClick={() => updateStatus(a.id, s)}>
-                        {s.charAt(0).toUpperCase() + s.slice(1)}
-                      </Button>
-                    ))}
-                  </div>
-                )}
               </CardContent>
             </Card>
           ))}
         </div>
       )}
+
+      {/* Edit Asset Dialog */}
+      <Dialog open={!!editAsset} onOpenChange={o => { if (!o) { setEditAsset(null); resetForm(); } }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Edit Asset</DialogTitle></DialogHeader>
+          <form onSubmit={handleEditSubmit} className="space-y-4">
+            <div><Label>Name *</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></div>
+            <div><Label>Description</Label><Input value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Category</Label>
+                <Select value={form.category} onValueChange={v => setForm({ ...form, category: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>{CATEGORIES.map(c => <SelectItem key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div><Label>Value (KSh)</Label><Input type="number" min={0} value={form.value || ""} onChange={e => setForm({ ...form, value: Number(e.target.value) })} /></div>
+            </div>
+            <div>
+              <Label>Status</Label>
+              <Select value={form.status} onValueChange={v => setForm({ ...form, status: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>{STATUSES.map(s => <SelectItem key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div className="flex gap-2">
+              <Button type="submit" className="flex-1">Save Changes</Button>
+              <Button type="button" variant="destructive" className="gap-1" onClick={() => setDeleteConfirm(editAsset?.id || null)}>
+                <Trash2 className="h-4 w-4" /> Delete
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation */}
+      <Dialog open={!!deleteConfirm} onOpenChange={o => { if (!o) setDeleteConfirm(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Delete Asset?</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">This action cannot be undone.</p>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setDeleteConfirm(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => handleDelete(deleteConfirm!)}>Delete</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
