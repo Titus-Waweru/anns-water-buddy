@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Droplets, BarChart3, Package, Users, Shield, TrendingUp, ArrowRight } from "lucide-react";
+import InstallPrompt from "@/components/InstallPrompt";
 import logo from "@/assets/logo.jpg";
 
 const features = [
