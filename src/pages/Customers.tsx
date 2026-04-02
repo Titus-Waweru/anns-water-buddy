@@ -1,21 +1,25 @@
 import { useState, useMemo } from "react";
 import { useData } from "@/context/DataContext";
+import { useAuth } from "@/context/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Users, Search, FileText, Phone, Mail, MapPin, Star } from "lucide-react";
+import { Plus, Users, Search, FileText, Phone, Mail, MapPin, Star, Pencil, Trash2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 
 export default function Customers() {
-  const { customers, sales, addCustomer, updateCustomer } = useData();
+  const { customers, sales, addCustomer, updateCustomer, deleteCustomer } = useData();
+  const { isAdmin } = useAuth();
   const [open, setOpen] = useState(false);
   const [detailCustomer, setDetailCustomer] = useState<string | null>(null);
+  const [editMode, setEditMode] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [filterType, setFilterType] = useState<string>("all");
   const [form, setForm] = useState({
@@ -40,36 +44,57 @@ export default function Customers() {
   const totalDebt = customers.reduce((s, c) => s + c.credit_balance, 0);
   const totalLoyaltyCustomers = customers.filter(c => (c as any).customer_type === "loyalty").length;
 
+  const resetForm = () => setForm({ name: "", phone: "", email: "", address: "", notes: "", customer_type: "regular", credit_balance: 0 });
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name.trim()) return;
-
-    // Check duplicates
     if (form.phone) {
       const dup = customers.find(c => c.phone === form.phone);
-      if (dup) {
-        toast({ title: "Duplicate phone number", description: `${dup.name} already has this phone.`, variant: "destructive" });
-        return;
-      }
+      if (dup) { toast({ title: "Duplicate phone number", description: `${dup.name} already has this phone.`, variant: "destructive" }); return; }
     }
     if (form.email) {
       const dup = customers.find(c => (c as any).email === form.email);
-      if (dup) {
-        toast({ title: "Duplicate email", description: `${dup.name} already has this email.`, variant: "destructive" });
-        return;
-      }
+      if (dup) { toast({ title: "Duplicate email", description: `${dup.name} already has this email.`, variant: "destructive" }); return; }
     }
-
     setSubmitting(true);
     try {
       await addCustomer(form as any);
-      setForm({ name: "", phone: "", email: "", address: "", notes: "", customer_type: "regular", credit_balance: 0 });
+      resetForm();
       setOpen(false);
       toast({ title: "Customer added successfully" });
-    } catch {
-      toast({ title: "Failed to add customer", variant: "destructive" });
-    }
+    } catch { toast({ title: "Failed to add customer", variant: "destructive" }); }
     setSubmitting(false);
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!detailCustomer || !form.name.trim()) return;
+    setSubmitting(true);
+    try {
+      await updateCustomer({ id: detailCustomer, ...form } as any);
+      toast({ title: "Customer updated" });
+      setEditMode(false);
+    } catch { toast({ title: "Failed to update", variant: "destructive" }); }
+    setSubmitting(false);
+  };
+
+  const handleDelete = async (id: string) => {
+    await deleteCustomer(id);
+    toast({ title: "Customer deleted" });
+    setDeleteConfirm(null);
+    setDetailCustomer(null);
+    setEditMode(false);
+  };
+
+  const openDetail = (c: any) => {
+    setDetailCustomer(c.id);
+    setEditMode(false);
+    setForm({
+      name: c.name, phone: c.phone || "", email: (c as any).email || "",
+      address: (c as any).address || "", notes: c.notes || "",
+      customer_type: (c as any).customer_type || "regular", credit_balance: c.credit_balance,
+    });
   };
 
   const customerSales = useMemo(() => {
@@ -81,7 +106,6 @@ export default function Customers() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Customers</h1>
@@ -115,7 +139,6 @@ export default function Customers() {
         </Dialog>
       </div>
 
-      {/* Summary cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Card className="stat-card"><CardContent className="p-4">
           <p className="text-xs text-muted-foreground">Total Customers</p>
@@ -135,7 +158,6 @@ export default function Customers() {
         </CardContent></Card>
       </div>
 
-      {/* Filters */}
       <div className="flex gap-3 flex-wrap">
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -152,7 +174,6 @@ export default function Customers() {
         </Select>
       </div>
 
-      {/* Customer list */}
       {filteredCustomers.length === 0 ? (
         <Card><CardContent className="py-12 text-center">
           <Users className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
@@ -161,7 +182,7 @@ export default function Customers() {
       ) : (
         <div className="space-y-2">
           {filteredCustomers.map(c => (
-            <Card key={c.id} className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => setDetailCustomer(c.id)}>
+            <Card key={c.id} className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => openDetail(c)}>
               <CardContent className="p-4 flex items-center justify-between gap-3">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
@@ -187,89 +208,132 @@ export default function Customers() {
       )}
 
       {/* Customer detail dialog */}
-      <Dialog open={!!detailCustomer} onOpenChange={o => { if (!o) setDetailCustomer(null); }}>
+      <Dialog open={!!detailCustomer} onOpenChange={o => { if (!o) { setDetailCustomer(null); setEditMode(false); } }}>
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           {selectedCustomer && (
             <>
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
-                  {selectedCustomer.name}
-                  {(selectedCustomer as any).customer_type === "loyalty" && <Badge variant="outline" className="border-secondary text-secondary">Loyalty</Badge>}
-                </DialogTitle>
-              </DialogHeader>
-              <Tabs defaultValue="info">
-                <TabsList className="w-full">
-                  <TabsTrigger value="info" className="flex-1">Info</TabsTrigger>
-                  <TabsTrigger value="history" className="flex-1">Purchase History</TabsTrigger>
-                  {selectedCustomer.credit_balance > 0 && <TabsTrigger value="invoice" className="flex-1">Invoice</TabsTrigger>}
-                </TabsList>
-                <TabsContent value="info" className="space-y-3 mt-3">
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    <div><span className="text-muted-foreground">Phone:</span><p className="font-medium">{selectedCustomer.phone || "N/A"}</p></div>
-                    <div><span className="text-muted-foreground">Email:</span><p className="font-medium">{(selectedCustomer as any).email || "N/A"}</p></div>
-                    <div><span className="text-muted-foreground">Address:</span><p className="font-medium">{(selectedCustomer as any).address || "N/A"}</p></div>
-                    <div><span className="text-muted-foreground">Type:</span><p className="font-medium capitalize">{(selectedCustomer as any).customer_type || "regular"}</p></div>
-                    <div><span className="text-muted-foreground">Credit Balance:</span><p className="font-medium text-destructive">KSh {selectedCustomer.credit_balance.toLocaleString()}</p></div>
-                    <div><span className="text-muted-foreground">Loyalty Points:</span><p className="font-medium">{selectedCustomer.loyalty_points}</p></div>
-                  </div>
-                  {selectedCustomer.notes && <p className="text-sm text-muted-foreground italic">{selectedCustomer.notes}</p>}
-                </TabsContent>
-                <TabsContent value="history" className="mt-3">
-                  {customerSales.length === 0 ? (
-                    <p className="text-sm text-muted-foreground text-center py-6">No purchases yet.</p>
-                  ) : (
-                    <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                      {customerSales.map(s => (
-                        <div key={s.id} className="flex items-center justify-between text-sm border-b pb-2">
-                          <div>
-                            <p className="font-medium">{s.product_name} × {s.quantity}</p>
-                            <p className="text-xs text-muted-foreground">{format(new Date(s.date), "dd MMM yyyy, HH:mm")}</p>
-                          </div>
-                          <div className="text-right">
-                            <p className="font-semibold">KSh {s.final_amount.toLocaleString()}</p>
-                            <Badge variant="outline" className="text-[10px]">{s.payment_mode}</Badge>
-                          </div>
-                        </div>
-                      ))}
+                  {editMode ? "Edit Customer" : selectedCustomer.name}
+                  {!editMode && (selectedCustomer as any).customer_type === "loyalty" && <Badge variant="outline" className="border-secondary text-secondary">Loyalty</Badge>}
+                  {!editMode && isAdmin && (
+                    <div className="ml-auto flex gap-1">
+                      <Button size="sm" variant="ghost" onClick={() => setEditMode(true)}><Pencil className="h-4 w-4" /></Button>
+                      <Button size="sm" variant="ghost" className="text-destructive" onClick={() => setDeleteConfirm(selectedCustomer.id)}><Trash2 className="h-4 w-4" /></Button>
                     </div>
                   )}
-                </TabsContent>
-                {selectedCustomer.credit_balance > 0 && (
-                  <TabsContent value="invoice" className="mt-3">
-                    <Card className="border-2">
-                      <CardContent className="p-4 space-y-3">
-                        <div className="text-center border-b pb-3">
-                          <h3 className="font-bold text-lg">WONDER AQUA LTD</h3>
-                          <p className="text-xs text-muted-foreground">Outstanding Balance Invoice</p>
-                          <p className="text-xs text-muted-foreground">{format(new Date(), "dd MMMM yyyy")}</p>
-                        </div>
-                        <div className="text-sm space-y-1">
-                          <p><strong>Customer:</strong> {selectedCustomer.name}</p>
-                          {selectedCustomer.phone && <p><strong>Phone:</strong> {selectedCustomer.phone}</p>}
-                        </div>
-                        <div className="border-t pt-2">
-                          <h4 className="text-sm font-semibold mb-2">Credit Purchases:</h4>
-                          {customerSales.filter(s => s.payment_mode === "Credit").map(s => (
-                            <div key={s.id} className="flex justify-between text-sm">
-                              <span>{s.product_name} × {s.quantity} ({format(new Date(s.date), "dd/MM")})</span>
-                              <span>KSh {s.final_amount.toLocaleString()}</span>
-                            </div>
-                          ))}
-                        </div>
-                        <div className="border-t pt-2 flex justify-between font-bold text-lg">
-                          <span>Total Owed:</span>
-                          <span className="text-destructive">KSh {selectedCustomer.credit_balance.toLocaleString()}</span>
-                        </div>
-                        <Button variant="outline" className="w-full gap-2 mt-2" onClick={() => window.print()}>
-                          <FileText className="h-4 w-4" /> Print Invoice
-                        </Button>
-                      </CardContent>
-                    </Card>
+                </DialogTitle>
+              </DialogHeader>
+
+              {editMode ? (
+                <form onSubmit={handleEditSubmit} className="space-y-3">
+                  <div><Label>Name *</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></div>
+                  <div><Label>Phone</Label><Input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></div>
+                  <div><Label>Email</Label><Input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></div>
+                  <div><Label>Address</Label><Input value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} /></div>
+                  <div>
+                    <Label>Type</Label>
+                    <Select value={form.customer_type} onValueChange={v => setForm({ ...form, customer_type: v })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="regular">Regular</SelectItem>
+                        <SelectItem value="loyalty">Loyalty</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div><Label>Notes</Label><Input value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></div>
+                  <div className="flex gap-2">
+                    <Button type="submit" className="flex-1" disabled={submitting}>Save</Button>
+                    <Button type="button" variant="outline" onClick={() => setEditMode(false)}>Cancel</Button>
+                  </div>
+                </form>
+              ) : (
+                <Tabs defaultValue="info">
+                  <TabsList className="w-full">
+                    <TabsTrigger value="info" className="flex-1">Info</TabsTrigger>
+                    <TabsTrigger value="history" className="flex-1">Purchase History</TabsTrigger>
+                    {selectedCustomer.credit_balance > 0 && <TabsTrigger value="invoice" className="flex-1">Invoice</TabsTrigger>}
+                  </TabsList>
+                  <TabsContent value="info" className="space-y-3 mt-3">
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div><span className="text-muted-foreground">Phone:</span><p className="font-medium">{selectedCustomer.phone || "N/A"}</p></div>
+                      <div><span className="text-muted-foreground">Email:</span><p className="font-medium">{(selectedCustomer as any).email || "N/A"}</p></div>
+                      <div><span className="text-muted-foreground">Address:</span><p className="font-medium">{(selectedCustomer as any).address || "N/A"}</p></div>
+                      <div><span className="text-muted-foreground">Type:</span><p className="font-medium capitalize">{(selectedCustomer as any).customer_type || "regular"}</p></div>
+                      <div><span className="text-muted-foreground">Credit Balance:</span><p className="font-medium text-destructive">KSh {selectedCustomer.credit_balance.toLocaleString()}</p></div>
+                      <div><span className="text-muted-foreground">Loyalty Points:</span><p className="font-medium">{selectedCustomer.loyalty_points}</p></div>
+                    </div>
+                    {selectedCustomer.notes && <p className="text-sm text-muted-foreground italic">{selectedCustomer.notes}</p>}
                   </TabsContent>
-                )}
-              </Tabs>
+                  <TabsContent value="history" className="mt-3">
+                    {customerSales.length === 0 ? (
+                      <p className="text-sm text-muted-foreground text-center py-6">No purchases yet.</p>
+                    ) : (
+                      <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                        {customerSales.map(s => (
+                          <div key={s.id} className="flex items-center justify-between text-sm border-b pb-2">
+                            <div>
+                              <p className="font-medium">{s.product_name} × {s.quantity}</p>
+                              <p className="text-xs text-muted-foreground">{format(new Date(s.date), "dd MMM yyyy, HH:mm")}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="font-semibold">KSh {s.final_amount.toLocaleString()}</p>
+                              <Badge variant="outline" className="text-[10px]">{s.payment_mode}</Badge>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </TabsContent>
+                  {selectedCustomer.credit_balance > 0 && (
+                    <TabsContent value="invoice" className="mt-3">
+                      <Card className="border-2">
+                        <CardContent className="p-4 space-y-3">
+                          <div className="text-center border-b pb-3">
+                            <h3 className="font-bold text-lg">WONDER AQUA LTD</h3>
+                            <p className="text-xs text-muted-foreground">Outstanding Balance Invoice</p>
+                            <p className="text-xs text-muted-foreground">{format(new Date(), "dd MMMM yyyy")}</p>
+                          </div>
+                          <div className="text-sm space-y-1">
+                            <p><strong>Customer:</strong> {selectedCustomer.name}</p>
+                            {selectedCustomer.phone && <p><strong>Phone:</strong> {selectedCustomer.phone}</p>}
+                          </div>
+                          <div className="border-t pt-2">
+                            <h4 className="text-sm font-semibold mb-2">Credit Purchases:</h4>
+                            {customerSales.filter(s => s.payment_mode === "Credit").map(s => (
+                              <div key={s.id} className="flex justify-between text-sm">
+                                <span>{s.product_name} × {s.quantity} ({format(new Date(s.date), "dd/MM")})</span>
+                                <span>KSh {s.final_amount.toLocaleString()}</span>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="border-t pt-2 flex justify-between font-bold text-lg">
+                            <span>Total Owed:</span>
+                            <span className="text-destructive">KSh {selectedCustomer.credit_balance.toLocaleString()}</span>
+                          </div>
+                          <Button variant="outline" className="w-full gap-2 mt-2" onClick={() => window.print()}>
+                            <FileText className="h-4 w-4" /> Print Invoice
+                          </Button>
+                        </CardContent>
+                      </Card>
+                    </TabsContent>
+                  )}
+                </Tabs>
+              )}
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation */}
+      <Dialog open={!!deleteConfirm} onOpenChange={o => { if (!o) setDeleteConfirm(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Delete Customer?</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">This will permanently remove this customer record.</p>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setDeleteConfirm(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => handleDelete(deleteConfirm!)}>Delete</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

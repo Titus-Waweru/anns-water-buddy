@@ -37,7 +37,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    const typeLabel = type === "signup" ? "Account Verification" : "Login Verification";
+    const typeLabel = type === "signup" ? "Account Verification" : type === "reset" ? "Password Reset" : "Login Verification";
 
     const htmlContent = `
 <!DOCTYPE html>
