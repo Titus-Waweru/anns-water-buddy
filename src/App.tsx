@@ -52,6 +52,27 @@ function LoadingSkeleton() {
   );
 }
 
+/** Smart landing: if installed as PWA, skip landing page */
+function SmartLanding() {
+  const { user, loading, isApproved, profile } = useAuth();
+  const isStandalone = window.matchMedia("(display-mode: standalone)").matches
+    || (window.navigator as any).standalone === true;
+
+  if (loading) return <LoadingSkeleton />;
+
+  // In standalone (installed) mode, never show landing page
+  if (isStandalone) {
+    if (user && profile && isApproved) return <Navigate to="/app" replace />;
+    return <Navigate to="/login" replace />;
+  }
+
+  // If logged in on web, redirect to app
+  if (user && profile && isApproved) return <Navigate to="/app" replace />;
+  if (user && profile && !isApproved) return <Navigate to="/pending" replace />;
+
+  return <LandingPage />;
+}
+
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading, isApproved, profile } = useAuth();
 
