@@ -90,6 +90,8 @@ export default function LandingPage() {
           </div>
         </div>
       </footer>
+
+      <InstallPrompt />
     </div>
   );
 }

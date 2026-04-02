@@ -72,10 +72,13 @@ export default function Login() {
               Sign In
             </Button>
           </form>
-          <p className="text-center text-sm text-muted-foreground mt-4">
-            Don't have an account?{" "}
-            <Link to="/signup" className="text-primary font-medium hover:underline">Sign Up</Link>
-          </p>
+          <div className="flex items-center justify-between text-sm text-muted-foreground mt-4">
+            <p>
+              Don't have an account?{" "}
+              <Link to="/signup" className="text-primary font-medium hover:underline">Sign Up</Link>
+            </p>
+            <Link to="/forgot-password" className="text-primary font-medium hover:underline">Forgot Password?</Link>
+          </div>
         </CardContent>
       </Card>
     </div>
