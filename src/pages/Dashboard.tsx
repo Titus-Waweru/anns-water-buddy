@@ -120,6 +120,9 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
+      {/* Subscription Status Card */}
+      <SubscriptionCard />
+
       <div>
         <h1 className="text-2xl font-bold text-foreground">{greeting()}, {profile?.full_name?.split(" ")[0] || "there"} 👋</h1>
         <p className="text-muted-foreground text-sm">Here's your Wonder Aqua overview</p>
