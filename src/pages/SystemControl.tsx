@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { AlertTriangle, Trash2, Loader2, ShieldAlert, Timer, Eye, EyeOff, Settings, Lock } from "lucide-react";
+import { AlertTriangle, Trash2, Loader2, ShieldAlert, Timer, Eye, EyeOff, Settings, Lock, CreditCard } from "lucide-react";
 import { toast } from "sonner";
 
 const RESET_TARGETS = [
@@ -33,6 +33,11 @@ export default function SystemControl() {
   const [mpesaVisible, setMpesaVisible] = useState<Record<string, boolean>>({});
   const [mpesaSaving, setMpesaSaving] = useState(false);
 
+  // Paystack
+  const [paystackKey, setPaystackKey] = useState("");
+  const [paystackVisible, setPaystackVisible] = useState(false);
+  const [paystackSaving, setPaystackSaving] = useState(false);
+
   // Countdown
   const [countdownDays, setCountdownDays] = useState(0);
   const [currentCountdown, setCurrentCountdown] = useState<{ end_date: string; remaining: number } | null>(null);
@@ -42,7 +47,7 @@ export default function SystemControl() {
     // Load M-Pesa settings
     supabase.from("system_settings").select("*").in("setting_key", [
       "mpesa_consumer_key", "mpesa_consumer_secret", "mpesa_shortcode", "mpesa_passkey",
-      "system_countdown_end",
+      "system_countdown_end", "paystack_public_key",
     ]).then(({ data }) => {
       const vals: Record<string, string> = {};
       data?.forEach(s => { vals[s.setting_key] = s.setting_value; });
@@ -57,6 +62,7 @@ export default function SystemControl() {
         const remaining = Math.max(0, Math.ceil((end.getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
         setCurrentCountdown({ end_date: vals.system_countdown_end, remaining });
       }
+      setPaystackKey(vals.paystack_public_key || "");
     });
   }, [isSuperAdmin]);
 
@@ -134,12 +140,54 @@ export default function SystemControl() {
         </div>
       </div>
 
-      <Tabs defaultValue="mpesa" className="space-y-4">
-        <TabsList className="grid grid-cols-3 w-full max-w-md">
+      <Tabs defaultValue="paystack" className="space-y-4">
+        <TabsList className="grid grid-cols-4 w-full max-w-lg">
+          <TabsTrigger value="paystack"><CreditCard className="h-3 w-3 mr-1" /> Paystack</TabsTrigger>
           <TabsTrigger value="mpesa"><Lock className="h-3 w-3 mr-1" /> M-Pesa</TabsTrigger>
           <TabsTrigger value="countdown"><Timer className="h-3 w-3 mr-1" /> Countdown</TabsTrigger>
           <TabsTrigger value="reset"><Trash2 className="h-3 w-3 mr-1" /> Reset</TabsTrigger>
         </TabsList>
+
+        {/* Paystack Public Key */}
+        <TabsContent value="paystack">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2"><CreditCard className="h-5 w-5" /> Paystack Configuration</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">Set your Paystack public key for subscription payments. Get it from your <span className="font-medium text-foreground">Paystack Dashboard → Settings → API Keys</span>.</p>
+              <div>
+                <Label>Public Key</Label>
+                <div className="flex gap-2">
+                  <Input
+                    type={paystackVisible ? "text" : "password"}
+                    value={paystackKey}
+                    onChange={e => setPaystackKey(e.target.value)}
+                    placeholder="pk_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                    className="font-mono text-xs"
+                  />
+                  <Button variant="ghost" size="icon" onClick={() => setPaystackVisible(p => !p)}>
+                    {paystackVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                </div>
+              </div>
+              <Button onClick={async () => {
+                setPaystackSaving(true);
+                const { data } = await supabase.from("system_settings").select("id").eq("setting_key", "paystack_public_key").maybeSingle();
+                if (data) {
+                  await supabase.from("system_settings").update({ setting_value: paystackKey, updated_by: user!.id }).eq("setting_key", "paystack_public_key");
+                } else {
+                  await supabase.from("system_settings").insert({ setting_key: "paystack_public_key", setting_value: paystackKey, updated_by: user!.id });
+                }
+                toast.success("Paystack public key saved");
+                setPaystackSaving(false);
+              }} disabled={paystackSaving || !paystackKey} className="w-full">
+                {paystackSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Save Paystack Key
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         {/* M-Pesa Credentials */}
         <TabsContent value="mpesa">

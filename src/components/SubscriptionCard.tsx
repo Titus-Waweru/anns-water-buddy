@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { format } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -5,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { CreditCard, Shield, AlertTriangle, Clock, CheckCircle } from "lucide-react";
 import { useSubscription, SubStatus } from "@/hooks/useSubscription";
 import { useAuth } from "@/context/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
 const STATUS_CONFIG: Record<SubStatus, { label: string; color: string; icon: any; bg: string }> = {
@@ -18,6 +20,12 @@ const STATUS_CONFIG: Record<SubStatus, { label: string; color: string; icon: any
 export default function SubscriptionCard() {
   const { record, status, daysRemaining, loading, recordPayment } = useSubscription();
   const { isAdmin, isSuperAdmin } = useAuth();
+  const [paystackKey, setPaystackKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    supabase.from("system_settings").select("setting_value").eq("setting_key", "paystack_public_key").maybeSingle()
+      .then(({ data }) => { if (data?.setting_value) setPaystackKey(data.setting_value); });
+  }, []);
 
   if (loading || !record) return null;
 
@@ -25,14 +33,17 @@ export default function SubscriptionCard() {
   const StatusIcon = cfg.icon;
 
   const handlePay = () => {
-    // Paystack inline integration
+    if (!paystackKey) {
+      toast.error("Paystack key not configured. Ask superadmin to set it in System Control.");
+      return;
+    }
     const w = window as any;
     if (!w.PaystackPop) {
       toast.error("Payment service loading. Please try again.");
       return;
     }
     const handler = w.PaystackPop.setup({
-      key: "pk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", // placeholder - superadmin sets real key via system settings
+      key: paystackKey,
       email: "billing@wonderaqua.com",
       amount: (record.amount || 1000) * 100, // Paystack uses kobo/cents
       currency: "KES",
