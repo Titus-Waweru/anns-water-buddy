@@ -33,6 +33,11 @@ export default function SystemControl() {
   const [mpesaVisible, setMpesaVisible] = useState<Record<string, boolean>>({});
   const [mpesaSaving, setMpesaSaving] = useState(false);
 
+  // Paystack
+  const [paystackKey, setPaystackKey] = useState("");
+  const [paystackVisible, setPaystackVisible] = useState(false);
+  const [paystackSaving, setPaystackSaving] = useState(false);
+
   // Countdown
   const [countdownDays, setCountdownDays] = useState(0);
   const [currentCountdown, setCurrentCountdown] = useState<{ end_date: string; remaining: number } | null>(null);
