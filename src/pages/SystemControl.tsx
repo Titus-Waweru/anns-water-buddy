@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { AlertTriangle, Trash2, Loader2, ShieldAlert, Timer, Eye, EyeOff, Settings, Lock } from "lucide-react";
+import { AlertTriangle, Trash2, Loader2, ShieldAlert, Timer, Eye, EyeOff, Settings, Lock, CreditCard } from "lucide-react";
 import { toast } from "sonner";
 
 const RESET_TARGETS = [
