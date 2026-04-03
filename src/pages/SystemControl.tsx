@@ -62,6 +62,7 @@ export default function SystemControl() {
         const remaining = Math.max(0, Math.ceil((end.getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
         setCurrentCountdown({ end_date: vals.system_countdown_end, remaining });
       }
+      setPaystackKey(vals.paystack_public_key || "");
     });
   }, [isSuperAdmin]);
 
