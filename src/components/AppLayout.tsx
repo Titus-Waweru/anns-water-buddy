@@ -36,6 +36,7 @@ const allNavItems: NavItem[] = [
   { title: "Teams", path: "/app/teams", icon: Users, roles: ["superadmin", "supervisor"] },
   { title: "Branches", path: "/app/branches", icon: Building, roles: ["superadmin", "supervisor"] },
   { title: "System Control", path: "/app/system-control", icon: ShieldAlert, roles: ["superadmin"] },
+  { title: "Subscription", path: "/app/subscription", icon: Timer, roles: ["superadmin"] },
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
