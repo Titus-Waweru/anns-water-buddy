@@ -47,7 +47,7 @@ export default function SystemControl() {
     // Load M-Pesa settings
     supabase.from("system_settings").select("*").in("setting_key", [
       "mpesa_consumer_key", "mpesa_consumer_secret", "mpesa_shortcode", "mpesa_passkey",
-      "system_countdown_end",
+      "system_countdown_end", "paystack_public_key",
     ]).then(({ data }) => {
       const vals: Record<string, string> = {};
       data?.forEach(s => { vals[s.setting_key] = s.setting_value; });
