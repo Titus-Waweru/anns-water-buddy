@@ -133,6 +133,7 @@ const App = () => (
                         <Route path="/production" element={<RoleRoute allowed={["stock_manager"]}><Production /></RoleRoute>} />
                         <Route path="/targets" element={<RoleRoute allowed={[]}><Targets /></RoleRoute>} />
                         <Route path="/system-control" element={<SystemControl />} />
+                        <Route path="/subscription" element={<SubscriptionSettings />} />
                         <Route path="*" element={<NotFound />} />
                       </Routes>
                     </AppLayout>
