@@ -27,6 +27,7 @@ import Vouchers from "@/pages/Vouchers";
 import Production from "@/pages/Production";
 import Targets from "@/pages/Targets";
 import SystemControl from "@/pages/SystemControl";
+import SubscriptionSettings from "@/pages/SubscriptionSettings";
 import NotFound from "@/pages/NotFound";
 import ForgotPassword from "@/pages/ForgotPassword";
 import ResetPassword from "@/pages/ResetPassword";
