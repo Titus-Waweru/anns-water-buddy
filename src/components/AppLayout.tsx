@@ -9,6 +9,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import ThemeToggle from "@/components/ThemeToggle";
+import SubscriptionBanner from "@/components/SubscriptionBanner";
 import logo from "@/assets/logo.jpg";
 
 interface NavItem {
