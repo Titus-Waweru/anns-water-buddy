@@ -27,6 +27,7 @@ import Vouchers from "@/pages/Vouchers";
 import Production from "@/pages/Production";
 import Targets from "@/pages/Targets";
 import SystemControl from "@/pages/SystemControl";
+import SubscriptionSettings from "@/pages/SubscriptionSettings";
 import NotFound from "@/pages/NotFound";
 import ForgotPassword from "@/pages/ForgotPassword";
 import ResetPassword from "@/pages/ResetPassword";
@@ -132,6 +133,7 @@ const App = () => (
                         <Route path="/production" element={<RoleRoute allowed={["stock_manager"]}><Production /></RoleRoute>} />
                         <Route path="/targets" element={<RoleRoute allowed={[]}><Targets /></RoleRoute>} />
                         <Route path="/system-control" element={<SystemControl />} />
+                        <Route path="/subscription" element={<SubscriptionSettings />} />
                         <Route path="*" element={<NotFound />} />
                       </Routes>
                     </AppLayout>

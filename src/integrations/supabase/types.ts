@@ -674,6 +674,48 @@ export type Database = {
           },
         ]
       }
+      subscription_records: {
+        Row: {
+          amount: number
+          billing_cycle: string
+          created_at: string
+          grace_period_days: number
+          id: string
+          last_payment_date: string | null
+          next_due_date: string
+          payment_reference: string | null
+          purpose: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          amount?: number
+          billing_cycle?: string
+          created_at?: string
+          grace_period_days?: number
+          id?: string
+          last_payment_date?: string | null
+          next_due_date: string
+          payment_reference?: string | null
+          purpose?: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          amount?: number
+          billing_cycle?: string
+          created_at?: string
+          grace_period_days?: number
+          id?: string
+          last_payment_date?: string | null
+          next_due_date?: string
+          payment_reference?: string | null
+          purpose?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       suppliers: {
         Row: {
           created_at: string

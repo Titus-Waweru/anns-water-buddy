@@ -9,6 +9,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import ThemeToggle from "@/components/ThemeToggle";
+import SubscriptionBanner from "@/components/SubscriptionBanner";
 import logo from "@/assets/logo.jpg";
 
 interface NavItem {
@@ -35,6 +36,7 @@ const allNavItems: NavItem[] = [
   { title: "Teams", path: "/app/teams", icon: Users, roles: ["superadmin", "supervisor"] },
   { title: "Branches", path: "/app/branches", icon: Building, roles: ["superadmin", "supervisor"] },
   { title: "System Control", path: "/app/system-control", icon: ShieldAlert, roles: ["superadmin"] },
+  { title: "Subscription", path: "/app/subscription", icon: Timer, roles: ["superadmin"] },
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -183,6 +185,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <ThemeToggle />
           </div>
         </div>
+
+        {/* Subscription warning banner */}
+        <SubscriptionBanner />
 
         {/* Countdown warning banner */}
         {countdown !== null && countdown <= 3 && countdown > 0 && (

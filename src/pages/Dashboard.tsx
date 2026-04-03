@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Package, ShoppingCart, TrendingUp, AlertTriangle, DollarSign, ArrowDownCircle, Users, CreditCard, Target, Trophy } from "lucide-react";
+import SubscriptionCard from "@/components/SubscriptionCard";
 import { format, isToday, startOfMonth, isAfter, subDays, startOfDay } from "date-fns";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, CartesianGrid, Legend } from "recharts";
 
@@ -119,6 +120,9 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
+      {/* Subscription Status Card */}
+      <SubscriptionCard />
+
       <div>
         <h1 className="text-2xl font-bold text-foreground">{greeting()}, {profile?.full_name?.split(" ")[0] || "there"} 👋</h1>
         <p className="text-muted-foreground text-sm">Here's your Wonder Aqua overview</p>
