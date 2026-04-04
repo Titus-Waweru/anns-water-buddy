@@ -2,12 +2,14 @@ import { Link, useLocation } from "react-router-dom";
 import { useState, useEffect } from "react";
 import {
   LayoutDashboard, Package, ShoppingCart, Truck, Users, Building, FileText, BarChart3, Menu, X, LogOut,
-  DollarSign, Wrench, Receipt, Factory, Target, ShieldAlert, Timer, AlertTriangle,
+  DollarSign, Wrench, Receipt, Factory, Target, ShieldAlert, Timer, AlertTriangle, GitBranch,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { useData } from "@/context/DataContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import ThemeToggle from "@/components/ThemeToggle";
 import SubscriptionBanner from "@/components/SubscriptionBanner";
 import logo from "@/assets/logo.jpg";
