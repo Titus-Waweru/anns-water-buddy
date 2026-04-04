@@ -45,16 +45,23 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { profile, signOut, roles, branchId, isAdmin } = useAuth();
+  const { branches, selectedBranchId, setSelectedBranchId } = useData();
   const [branchName, setBranchName] = useState<string | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
 
+  // For non-admin users, show their assigned branch name
   useEffect(() => {
-    if (branchId) {
+    if (!isAdmin && branchId) {
       supabase.from("branches").select("name").eq("id", branchId).single().then(({ data }) => {
         if (data) setBranchName(data.name);
       });
+    } else if (isAdmin && selectedBranchId) {
+      const b = branches.find(br => br.id === selectedBranchId);
+      setBranchName(b?.name || null);
+    } else if (isAdmin) {
+      setBranchName("All Branches");
     }
-  }, [branchId]);
+  }, [branchId, isAdmin, selectedBranchId, branches]);
 
   // Fetch system countdown for non-superadmin
   useEffect(() => {
