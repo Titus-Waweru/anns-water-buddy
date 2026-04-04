@@ -133,6 +133,28 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </nav>
 
         <div className="p-4 border-t border-sidebar-border space-y-3">
+          {/* Branch selector for admins & stock managers */}
+          {(isAdmin || roles.includes("stock_manager")) && branches.length > 0 && (
+            <div className="space-y-1">
+              <label className="text-[10px] font-medium text-sidebar-foreground/50 flex items-center gap-1">
+                <GitBranch className="h-3 w-3" /> Branch
+              </label>
+              <Select
+                value={selectedBranchId || "all"}
+                onValueChange={(v) => setSelectedBranchId(v === "all" ? null : v)}
+              >
+                <SelectTrigger className="h-8 text-xs bg-sidebar-accent/50 border-sidebar-border">
+                  <SelectValue placeholder="All Branches" />
+                </SelectTrigger>
+                <SelectContent>
+                  {isAdmin && <SelectItem value="all">All Branches</SelectItem>}
+                  {branches.filter(b => b.is_active).map(b => (
+                    <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           {profile && (
             <div className="flex items-center gap-2">
               <div className="h-7 w-7 rounded-full gradient-bg flex items-center justify-center text-xs font-bold text-primary-foreground shrink-0">
