@@ -10,6 +10,12 @@ type DbSale = Database["public"]["Tables"]["sales"]["Row"];
 type DbPurchase = Database["public"]["Tables"]["purchases"]["Row"];
 type DbInventoryLog = Database["public"]["Tables"]["inventory_logs"]["Row"];
 
+export interface Branch {
+  id: string;
+  name: string;
+  is_active: boolean;
+}
+
 interface DataContextType {
   products: DbProduct[];
   customers: DbCustomer[];
@@ -19,6 +25,12 @@ interface DataContextType {
   inventoryLogs: DbInventoryLog[];
   loading: boolean;
   error: string | null;
+
+  // Branch selector for admins
+  branches: Branch[];
+  selectedBranchId: string | null;
+  setSelectedBranchId: (id: string | null) => void;
+  effectiveBranchId: string | null; // The branch used for filtering & tagging
 
   addProduct: (p: Database["public"]["Tables"]["products"]["Insert"]) => Promise<void>;
   updateProduct: (p: Database["public"]["Tables"]["products"]["Update"] & { id: string }) => Promise<void>;
@@ -73,13 +85,29 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const retryCount = useRef(0);
 
+  // Branch management
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
+
+  // Effective branch: for non-admins it's their assigned branch; for admins it's selected or null (all)
+  const effectiveBranchId = isAdmin ? selectedBranchId : branchId;
+
+  // Fetch branches for admins
+  useEffect(() => {
+    if (!user) return;
+    supabase.from("branches").select("id, name, is_active").order("name").then(({ data }) => {
+      if (data) setBranches(data);
+    });
+  }, [user]);
+
   const fetchAll = useCallback(async () => {
     if (!user) return;
     setLoading(true);
     setError(null);
 
-    // Branch filter: non-admin users only see their branch data
-    const shouldFilter = !isSuperAdmin && !isAdmin && !!branchId;
+    // For non-admin users, always filter by their branch
+    // For admins, filter by selected branch (or show all if null)
+    const filterBranch = isAdmin ? selectedBranchId : branchId;
 
     try {
       const result = await fetchWithTimeout(async () => {
@@ -90,7 +118,14 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         let purchQ = supabase.from("purchases").select("*").order("date", { ascending: false });
         let logQ = supabase.from("inventory_logs").select("*").order("date", { ascending: false });
 
-        if (shouldFilter) {
+        if (filterBranch) {
+          prodQ = prodQ.eq("branch_id", filterBranch);
+          custQ = custQ.eq("branch_id", filterBranch);
+          saleQ = saleQ.eq("branch_id", filterBranch);
+          purchQ = purchQ.eq("branch_id", filterBranch);
+          logQ = logQ.eq("branch_id", filterBranch);
+        } else if (!isAdmin && !isSuperAdmin && branchId) {
+          // Fallback safety for non-admin without filter
           prodQ = prodQ.eq("branch_id", branchId);
           custQ = custQ.eq("branch_id", branchId);
           saleQ = saleQ.eq("branch_id", branchId);
@@ -113,7 +148,6 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       console.error("DataContext fetch error:", err);
       if (retryCount.current < MAX_RETRIES) {
         retryCount.current++;
-        // Retry after 1 second
         setTimeout(() => fetchAll(), 1000);
         return;
       }
@@ -121,14 +155,14 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, [user, isSuperAdmin, isAdmin, branchId]);
+  }, [user, isSuperAdmin, isAdmin, branchId, selectedBranchId]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
   const addProduct = useCallback(async (p: Database["public"]["Tables"]["products"]["Insert"]) => {
-    const { error } = await supabase.from("products").insert(p);
+    const { error } = await supabase.from("products").insert({ ...p, branch_id: p.branch_id || effectiveBranchId });
     if (!error) fetchAll();
-  }, [fetchAll]);
+  }, [fetchAll, effectiveBranchId]);
 
   const updateProduct = useCallback(async (p: Database["public"]["Tables"]["products"]["Update"] & { id: string }) => {
     const { id, ...rest } = p;
@@ -142,9 +176,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   }, [fetchAll]);
 
   const addCustomer = useCallback(async (c: Database["public"]["Tables"]["customers"]["Insert"]) => {
-    await supabase.from("customers").insert(c);
+    await supabase.from("customers").insert({ ...c, branch_id: c.branch_id || effectiveBranchId });
     fetchAll();
-  }, [fetchAll]);
+  }, [fetchAll, effectiveBranchId]);
 
   const updateCustomer = useCallback(async (c: Database["public"]["Tables"]["customers"]["Update"] & { id: string }) => {
     const { id, ...rest } = c;
@@ -174,7 +208,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   }, [fetchAll]);
 
   const addSale = useCallback(async (s: Database["public"]["Tables"]["sales"]["Insert"]) => {
-    const { data: saleData, error: saleErr } = await supabase.from("sales").insert(s).select().single();
+    const saleWithBranch = { ...s, branch_id: s.branch_id || effectiveBranchId, recorded_by: s.recorded_by || user?.id };
+    const { data: saleData, error: saleErr } = await supabase.from("sales").insert(saleWithBranch).select().single();
     if (saleErr || !saleData) return;
 
     // Reduce inventory
@@ -191,7 +226,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       quantity: s.quantity,
       reference: `Sale to ${s.customer_name || "Walk-in"}`,
       date: s.date || new Date().toISOString(),
-      branch_id: s.branch_id || branchId,
+      branch_id: s.branch_id || effectiveBranchId,
     });
 
     // Update customer credit if credit sale
@@ -205,10 +240,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     }
 
     fetchAll();
-  }, [fetchAll, products, customers, branchId]);
+  }, [fetchAll, products, customers, effectiveBranchId, user]);
 
   const addPurchase = useCallback(async (p: Database["public"]["Tables"]["purchases"]["Insert"]) => {
-    const { error } = await supabase.from("purchases").insert(p);
+    const purchaseWithBranch = { ...p, branch_id: p.branch_id || effectiveBranchId, recorded_by: p.recorded_by || user?.id };
+    const { error } = await supabase.from("purchases").insert(purchaseWithBranch);
     if (error) return;
 
     // Increase inventory
@@ -228,15 +264,16 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       quantity: p.quantity,
       reference: `Purchase from ${p.supplier_name}`,
       date: p.date || new Date().toISOString(),
-      branch_id: p.branch_id || branchId,
+      branch_id: p.branch_id || effectiveBranchId,
     });
 
     fetchAll();
-  }, [fetchAll, products, branchId]);
+  }, [fetchAll, products, effectiveBranchId, user]);
 
   return (
     <DataContext.Provider value={{
       products, customers, suppliers, sales, purchases, inventoryLogs, loading, error,
+      branches, selectedBranchId, setSelectedBranchId, effectiveBranchId,
       addProduct, updateProduct, deleteProduct,
       addCustomer, updateCustomer, deleteCustomer,
       addSupplier, updateSupplier, deleteSupplier,
