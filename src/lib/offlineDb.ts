@@ -1,4 +1,4 @@
-import { openDB, type DBSchema, type IDBPDatabase } from "idb";
+import { openDB, type IDBPDatabase } from "idb";
 
 interface OfflineAction {
   id: string;
@@ -9,7 +9,7 @@ interface OfflineAction {
   isSynced: boolean;
 }
 
-interface WonderAquaDB extends DBSchema {
+interface WonderAquaDB {
   syncQueue: {
     key: string;
     value: OfflineAction;
