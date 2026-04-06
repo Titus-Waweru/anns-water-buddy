@@ -2,6 +2,8 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/context/AuthContext";
 import type { Database } from "@/integrations/supabase/types";
+import { queueOfflineAction } from "@/lib/offlineDb";
+import { toast } from "sonner";
 
 type DbProduct = Database["public"]["Tables"]["products"]["Row"];
 type DbCustomer = Database["public"]["Tables"]["customers"]["Row"];
@@ -209,6 +211,13 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
   const addSale = useCallback(async (s: Database["public"]["Tables"]["sales"]["Insert"]) => {
     const saleWithBranch = { ...s, branch_id: s.branch_id || effectiveBranchId, recorded_by: s.recorded_by || user?.id };
+
+    if (!navigator.onLine) {
+      await queueOfflineAction("sales", saleWithBranch as Record<string, unknown>);
+      toast.info("Sale saved offline — will sync when back online");
+      return;
+    }
+
     const { data: saleData, error: saleErr } = await supabase.from("sales").insert(saleWithBranch).select().single();
     if (saleErr || !saleData) return;
 
