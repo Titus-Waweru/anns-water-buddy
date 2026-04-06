@@ -199,6 +199,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
           <NetworkStatusIndicator syncState={syncState} pendingCount={pendingCount} />
           <ThemeToggle />
+        </header>
 
         {/* Desktop top bar */}
         <div className="hidden lg:flex items-center justify-between px-6 py-2.5 border-b bg-card/80 backdrop-blur-sm sticky top-0 z-30">
