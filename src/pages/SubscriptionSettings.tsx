@@ -206,6 +206,27 @@ export default function SubscriptionSettings() {
 
         <div className="space-y-4">
           <SubscriptionCard />
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm flex items-center gap-2">
+                {notificationsEnabled ? <Bell className="h-4 w-4 text-primary" /> : <BellOff className="h-4 w-4 text-muted-foreground" />}
+                Subscription Notifications
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium">Show reminder banners</p>
+                  <p className="text-xs text-muted-foreground">Warning and grace period banners for all users</p>
+                </div>
+                <Switch
+                  checked={notificationsEnabled}
+                  onCheckedChange={toggleNotifications}
+                />
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
     </div>
