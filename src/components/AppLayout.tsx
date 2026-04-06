@@ -197,8 +197,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <Badge variant="outline" className="text-[8px] uppercase shrink-0">{roleLabel}</Badge>
             </div>
           </div>
+          <NetworkStatusIndicator syncState={syncState} pendingCount={pendingCount} />
           <ThemeToggle />
-        </header>
 
         {/* Desktop top bar */}
         <div className="hidden lg:flex items-center justify-between px-6 py-2.5 border-b bg-card/80 backdrop-blur-sm sticky top-0 z-30">
@@ -207,6 +207,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             {profile && <span className="text-muted-foreground">· {profile.full_name}</span>}
           </div>
           <div className="flex items-center gap-3">
+            <NetworkStatusIndicator syncState={syncState} pendingCount={pendingCount} />
             {countdown !== null && countdown <= 7 && (
               <div className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${countdown <= 3 ? "bg-destructive/10 text-destructive" : "bg-yellow-500/10 text-yellow-600"}`}>
                 <Timer className="h-3 w-3" />
