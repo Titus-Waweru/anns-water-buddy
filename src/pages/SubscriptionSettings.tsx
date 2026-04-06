@@ -5,8 +5,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Shield, Save, Loader2, Plus, RefreshCw } from "lucide-react";
+import { Shield, Save, Loader2, Plus, RefreshCw, Bell, BellOff } from "lucide-react";
 import { toast } from "sonner";
 import { format, addMonths } from "date-fns";
 import SubscriptionCard from "@/components/SubscriptionCard";
@@ -23,9 +24,11 @@ export default function SubscriptionSettings() {
   const [gracePeriod, setGracePeriod] = useState("7");
   const [startDate, setStartDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [purpose, setPurpose] = useState("DATABASE RENEWALS");
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
 
   useEffect(() => {
     loadRecord();
+    loadNotificationSetting();
   }, []);
 
   const loadRecord = async () => {
