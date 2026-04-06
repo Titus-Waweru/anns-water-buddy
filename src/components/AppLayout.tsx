@@ -12,6 +12,8 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import ThemeToggle from "@/components/ThemeToggle";
 import SubscriptionBanner from "@/components/SubscriptionBanner";
+import NetworkStatusIndicator from "@/components/NetworkStatusIndicator";
+import { useOfflineSync } from "@/hooks/useOfflineSync";
 import logo from "@/assets/logo.jpg";
 
 interface NavItem {
@@ -45,9 +47,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { profile, signOut, roles, branchId, isAdmin } = useAuth();
-  const { branches, selectedBranchId, setSelectedBranchId } = useData();
+  const { branches, selectedBranchId, setSelectedBranchId, refetch } = useData();
   const [branchName, setBranchName] = useState<string | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
+  const { syncState, pendingCount } = useOfflineSync(refetch);
 
   // For non-admin users, show their assigned branch name
   useEffect(() => {
