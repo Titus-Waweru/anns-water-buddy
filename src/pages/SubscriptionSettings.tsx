@@ -53,6 +53,35 @@ export default function SubscriptionSettings() {
     setLoading(false);
   };
 
+  const loadNotificationSetting = async () => {
+    const { data } = await supabase
+      .from("system_settings")
+      .select("setting_value")
+      .eq("setting_key", "subscription_notifications_enabled")
+      .maybeSingle();
+    if (data) {
+      setNotificationsEnabled(data.setting_value === "true");
+    }
+  };
+
+  const toggleNotifications = async (enabled: boolean) => {
+    setNotificationsEnabled(enabled);
+    const { data: existing } = await supabase
+      .from("system_settings")
+      .select("id")
+      .eq("setting_key", "subscription_notifications_enabled")
+      .maybeSingle();
+    if (existing) {
+      await supabase.from("system_settings")
+        .update({ setting_value: enabled ? "true" : "false", updated_at: new Date().toISOString() } as any)
+        .eq("id", existing.id);
+    } else {
+      await supabase.from("system_settings")
+        .insert({ setting_key: "subscription_notifications_enabled", setting_value: enabled ? "true" : "false" } as any);
+    }
+    toast.success(`Subscription notifications ${enabled ? "enabled" : "disabled"}`);
+  };
+
   const handleSave = async () => {
     setSaving(true);
     const nextDue = new Date(startDate);
