@@ -178,7 +178,13 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   }, [fetchAll]);
 
   const addCustomer = useCallback(async (c: Database["public"]["Tables"]["customers"]["Insert"]) => {
-    await supabase.from("customers").insert({ ...c, branch_id: c.branch_id || effectiveBranchId });
+    const customerWithBranch = { ...c, branch_id: c.branch_id || effectiveBranchId };
+    if (!navigator.onLine) {
+      await queueOfflineAction("customers", customerWithBranch as Record<string, unknown>);
+      toast.info("Customer saved offline — will sync when back online");
+      return;
+    }
+    await supabase.from("customers").insert(customerWithBranch);
     fetchAll();
   }, [fetchAll, effectiveBranchId]);
 
