@@ -1,10 +1,24 @@
-import { AlertTriangle, CheckCircle, Clock, Shield } from "lucide-react";
+import { useState, useEffect } from "react";
+import { AlertTriangle, Clock } from "lucide-react";
 import { useSubscription } from "@/hooks/useSubscription";
+import { supabase } from "@/integrations/supabase/client";
 
 export default function SubscriptionBanner() {
   const { status, daysRemaining, loading, record } = useSubscription();
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
 
-  if (loading || !record || status === "active") return null;
+  useEffect(() => {
+    supabase
+      .from("system_settings")
+      .select("setting_value")
+      .eq("setting_key", "subscription_notifications_enabled")
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data) setNotificationsEnabled(data.setting_value === "true");
+      });
+  }, []);
+
+  if (loading || !record || status === "active" || !notificationsEnabled) return null;
 
   if (status === "warning") {
     return (

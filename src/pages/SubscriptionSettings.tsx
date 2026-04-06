@@ -5,8 +5,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Shield, Save, Loader2, Plus, RefreshCw } from "lucide-react";
+import { Shield, Save, Loader2, Plus, RefreshCw, Bell, BellOff } from "lucide-react";
 import { toast } from "sonner";
 import { format, addMonths } from "date-fns";
 import SubscriptionCard from "@/components/SubscriptionCard";
@@ -23,9 +24,11 @@ export default function SubscriptionSettings() {
   const [gracePeriod, setGracePeriod] = useState("7");
   const [startDate, setStartDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [purpose, setPurpose] = useState("DATABASE RENEWALS");
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
 
   useEffect(() => {
     loadRecord();
+    loadNotificationSetting();
   }, []);
 
   const loadRecord = async () => {
@@ -48,6 +51,35 @@ export default function SubscriptionSettings() {
       }
     }
     setLoading(false);
+  };
+
+  const loadNotificationSetting = async () => {
+    const { data } = await supabase
+      .from("system_settings")
+      .select("setting_value")
+      .eq("setting_key", "subscription_notifications_enabled")
+      .maybeSingle();
+    if (data) {
+      setNotificationsEnabled(data.setting_value === "true");
+    }
+  };
+
+  const toggleNotifications = async (enabled: boolean) => {
+    setNotificationsEnabled(enabled);
+    const { data: existing } = await supabase
+      .from("system_settings")
+      .select("id")
+      .eq("setting_key", "subscription_notifications_enabled")
+      .maybeSingle();
+    if (existing) {
+      await supabase.from("system_settings")
+        .update({ setting_value: enabled ? "true" : "false", updated_at: new Date().toISOString() } as any)
+        .eq("id", existing.id);
+    } else {
+      await supabase.from("system_settings")
+        .insert({ setting_key: "subscription_notifications_enabled", setting_value: enabled ? "true" : "false" } as any);
+    }
+    toast.success(`Subscription notifications ${enabled ? "enabled" : "disabled"}`);
   };
 
   const handleSave = async () => {
@@ -174,6 +206,27 @@ export default function SubscriptionSettings() {
 
         <div className="space-y-4">
           <SubscriptionCard />
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm flex items-center gap-2">
+                {notificationsEnabled ? <Bell className="h-4 w-4 text-primary" /> : <BellOff className="h-4 w-4 text-muted-foreground" />}
+                Subscription Notifications
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium">Show reminder banners</p>
+                  <p className="text-xs text-muted-foreground">Warning and grace period banners for all users</p>
+                </div>
+                <Switch
+                  checked={notificationsEnabled}
+                  onCheckedChange={toggleNotifications}
+                />
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
     </div>

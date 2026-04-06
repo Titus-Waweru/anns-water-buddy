@@ -12,6 +12,8 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import ThemeToggle from "@/components/ThemeToggle";
 import SubscriptionBanner from "@/components/SubscriptionBanner";
+import NetworkStatusIndicator from "@/components/NetworkStatusIndicator";
+import { useOfflineSync } from "@/hooks/useOfflineSync";
 import logo from "@/assets/logo.jpg";
 
 interface NavItem {
@@ -45,9 +47,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { profile, signOut, roles, branchId, isAdmin } = useAuth();
-  const { branches, selectedBranchId, setSelectedBranchId } = useData();
+  const { branches, selectedBranchId, setSelectedBranchId, refetch } = useData();
   const [branchName, setBranchName] = useState<string | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
+  const { syncState, pendingCount } = useOfflineSync(refetch);
 
   // For non-admin users, show their assigned branch name
   useEffect(() => {
@@ -194,6 +197,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <Badge variant="outline" className="text-[8px] uppercase shrink-0">{roleLabel}</Badge>
             </div>
           </div>
+          <NetworkStatusIndicator syncState={syncState} pendingCount={pendingCount} />
           <ThemeToggle />
         </header>
 
@@ -204,6 +208,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             {profile && <span className="text-muted-foreground">· {profile.full_name}</span>}
           </div>
           <div className="flex items-center gap-3">
+            <NetworkStatusIndicator syncState={syncState} pendingCount={pendingCount} />
             {countdown !== null && countdown <= 7 && (
               <div className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${countdown <= 3 ? "bg-destructive/10 text-destructive" : "bg-yellow-500/10 text-yellow-600"}`}>
                 <Timer className="h-3 w-3" />
