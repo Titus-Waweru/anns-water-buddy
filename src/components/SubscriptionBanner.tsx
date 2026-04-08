@@ -1,24 +1,34 @@
 import { useState, useEffect } from "react";
 import { AlertTriangle, Clock } from "lucide-react";
 import { useSubscription } from "@/hooks/useSubscription";
+import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 
 export default function SubscriptionBanner() {
   const { status, daysRemaining, loading, record } = useSubscription();
+  const { isSuperAdmin, roles, isAdmin } = useAuth();
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [subscriptionVisible, setSubscriptionVisible] = useState(false);
 
   useEffect(() => {
     supabase
       .from("system_settings")
-      .select("setting_value")
-      .eq("setting_key", "subscription_notifications_enabled")
-      .maybeSingle()
+      .select("setting_value, setting_key")
+      .in("setting_key", ["subscription_notifications_enabled", "subscription_visible"])
       .then(({ data }) => {
-        if (data) setNotificationsEnabled(data.setting_value === "true");
+        data?.forEach(s => {
+          if (s.setting_key === "subscription_notifications_enabled") setNotificationsEnabled(s.setting_value === "true");
+          if (s.setting_key === "subscription_visible") setSubscriptionVisible(s.setting_value === "true");
+        });
       });
   }, []);
 
   if (loading || !record || status === "active" || !notificationsEnabled) return null;
+
+  // Cashiers/Stock managers never see
+  const isCashierOrStock = roles.some(r => r === "cashier" || r === "stock_manager") && !isAdmin;
+  if (isCashierOrStock) return null;
+  if (!isSuperAdmin && !subscriptionVisible) return null;
 
   if (status === "warning") {
     return (
