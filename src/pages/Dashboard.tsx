@@ -7,6 +7,9 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Package, ShoppingCart, TrendingUp, AlertTriangle, DollarSign, ArrowDownCircle, Users, CreditCard, Target, Trophy } from "lucide-react";
 import SubscriptionCard from "@/components/SubscriptionCard";
+import AnimatedPage from "@/components/AnimatedPage";
+import AnimatedCounter from "@/components/AnimatedCounter";
+import { motion } from "framer-motion";
 import { format, isToday, startOfMonth, isAfter, subDays, startOfDay } from "date-fns";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, CartesianGrid, Legend } from "recharts";
 
@@ -118,7 +121,14 @@ export default function Dashboard() {
   const isCashier = roles.includes("cashier") && !isAdmin;
   const isStockMgr = roles.includes("stock_manager") && !isAdmin;
 
+  const cardMotion = {
+    initial: { opacity: 0, y: 20, scale: 0.97 },
+    animate: { opacity: 1, y: 0, scale: 1 },
+    transition: { duration: 0.35 },
+  };
+
   return (
+    <AnimatedPage>
     <div className="space-y-6">
       {/* Subscription Status Card */}
       <SubscriptionCard />
@@ -163,60 +173,76 @@ export default function Dashboard() {
 
       {/* Stats grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Card className="stat-card"><CardContent className="p-4">
-          <div className="flex items-center justify-between">
-            <div><p className="text-xs text-muted-foreground font-medium">Today's Sales</p><p className="text-xl font-bold text-foreground">KSh {todaySalesTotal.toLocaleString()}</p></div>
-            <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center"><ShoppingCart className="h-5 w-5 text-secondary" /></div>
-          </div>
-        </CardContent></Card>
+        <motion.div {...cardMotion} transition={{ ...cardMotion.transition, delay: 0 }}>
+          <Card className="stat-card hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300"><CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div><p className="text-xs text-muted-foreground font-medium">Today's Sales</p><p className="text-xl font-bold text-foreground"><AnimatedCounter value={todaySalesTotal} prefix="KSh " /></p></div>
+              <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center"><ShoppingCart className="h-5 w-5 text-secondary" /></div>
+            </div>
+          </CardContent></Card>
+        </motion.div>
         {!isCashier && (
-          <Card className="stat-card"><CardContent className="p-4">
+          <motion.div {...cardMotion} transition={{ ...cardMotion.transition, delay: 0.05 }}>
+            <Card className="stat-card hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300"><CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div><p className="text-xs text-muted-foreground font-medium">Today's Purchases</p><p className="text-xl font-bold text-foreground"><AnimatedCounter value={todayPurchasesTotal} prefix="KSh " /></p></div>
+                <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center"><ArrowDownCircle className="h-5 w-5 text-secondary" /></div>
+              </div>
+            </CardContent></Card>
+          </motion.div>
+        )}
+        <motion.div {...cardMotion} transition={{ ...cardMotion.transition, delay: 0.1 }}>
+          <Card className="stat-card hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300"><CardContent className="p-4">
             <div className="flex items-center justify-between">
-              <div><p className="text-xs text-muted-foreground font-medium">Today's Purchases</p><p className="text-xl font-bold text-foreground">KSh {todayPurchasesTotal.toLocaleString()}</p></div>
-              <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center"><ArrowDownCircle className="h-5 w-5 text-secondary" /></div>
+              <div><p className="text-xs text-muted-foreground font-medium">Today's Profit</p><p className="text-xl font-bold text-success"><AnimatedCounter value={todayProfit} prefix="KSh " /></p></div>
+              <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center"><TrendingUp className="h-5 w-5 text-success" /></div>
             </div>
           </CardContent></Card>
-        )}
-        <Card className="stat-card"><CardContent className="p-4">
-          <div className="flex items-center justify-between">
-            <div><p className="text-xs text-muted-foreground font-medium">Today's Profit</p><p className="text-xl font-bold text-success">KSh {todayProfit.toLocaleString()}</p></div>
-            <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center"><TrendingUp className="h-5 w-5 text-success" /></div>
-          </div>
-        </CardContent></Card>
+        </motion.div>
         {!isCashier && !isStockMgr && (
-          <Card className="stat-card"><CardContent className="p-4">
+          <motion.div {...cardMotion} transition={{ ...cardMotion.transition, delay: 0.15 }}>
+            <Card className="stat-card hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300"><CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div><p className="text-xs text-muted-foreground font-medium">Monthly Profit</p><p className="text-xl font-bold text-success"><AnimatedCounter value={monthProfit} prefix="KSh " /></p></div>
+                <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center"><DollarSign className="h-5 w-5 text-success" /></div>
+              </div>
+            </CardContent></Card>
+          </motion.div>
+        )}
+        <motion.div {...cardMotion} transition={{ ...cardMotion.transition, delay: 0.2 }}>
+          <Card className="stat-card hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300"><CardContent className="p-4">
             <div className="flex items-center justify-between">
-              <div><p className="text-xs text-muted-foreground font-medium">Monthly Profit</p><p className="text-xl font-bold text-success">KSh {monthProfit.toLocaleString()}</p></div>
-              <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center"><DollarSign className="h-5 w-5 text-success" /></div>
+              <div><p className="text-xs text-muted-foreground font-medium">Inventory</p><p className="text-xl font-bold text-foreground"><AnimatedCounter value={totalInventory} suffix=" bottles" /></p></div>
+              <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center"><Package className="h-5 w-5 text-secondary" /></div>
             </div>
           </CardContent></Card>
-        )}
-        <Card className="stat-card"><CardContent className="p-4">
-          <div className="flex items-center justify-between">
-            <div><p className="text-xs text-muted-foreground font-medium">Inventory</p><p className="text-xl font-bold text-foreground">{totalInventory} bottles</p></div>
-            <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center"><Package className="h-5 w-5 text-secondary" /></div>
-          </div>
-        </CardContent></Card>
-        <Card className="stat-card"><CardContent className="p-4">
-          <div className="flex items-center justify-between">
-            <div><p className="text-xs text-muted-foreground font-medium">Low Stock</p><p className="text-xl font-bold text-destructive">{lowStockProducts.length} items</p></div>
-            <div className="h-10 w-10 rounded-lg bg-destructive/10 flex items-center justify-center"><AlertTriangle className="h-5 w-5 text-destructive" /></div>
-          </div>
-        </CardContent></Card>
+        </motion.div>
+        <motion.div {...cardMotion} transition={{ ...cardMotion.transition, delay: 0.25 }}>
+          <Card className="stat-card hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300"><CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div><p className="text-xs text-muted-foreground font-medium">Low Stock</p><p className="text-xl font-bold text-destructive"><AnimatedCounter value={lowStockProducts.length} suffix=" items" /></p></div>
+              <div className="h-10 w-10 rounded-lg bg-destructive/10 flex items-center justify-center"><AlertTriangle className="h-5 w-5 text-destructive" /></div>
+            </div>
+          </CardContent></Card>
+        </motion.div>
         {!isStockMgr && (
           <>
-            <Card className="stat-card"><CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div><p className="text-xs text-muted-foreground font-medium">Customers</p><p className="text-xl font-bold text-foreground">{customers.length}</p></div>
-                <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center"><Users className="h-5 w-5 text-secondary" /></div>
-              </div>
-            </CardContent></Card>
-            <Card className="stat-card"><CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div><p className="text-xs text-muted-foreground font-medium">Customer Debt</p><p className="text-xl font-bold text-destructive">KSh {totalDebt.toLocaleString()}</p></div>
-                <div className="h-10 w-10 rounded-lg bg-destructive/10 flex items-center justify-center"><CreditCard className="h-5 w-5 text-destructive" /></div>
-              </div>
-            </CardContent></Card>
+            <motion.div {...cardMotion} transition={{ ...cardMotion.transition, delay: 0.3 }}>
+              <Card className="stat-card hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300"><CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div><p className="text-xs text-muted-foreground font-medium">Customers</p><p className="text-xl font-bold text-foreground"><AnimatedCounter value={customers.length} /></p></div>
+                  <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center"><Users className="h-5 w-5 text-secondary" /></div>
+                </div>
+              </CardContent></Card>
+            </motion.div>
+            <motion.div {...cardMotion} transition={{ ...cardMotion.transition, delay: 0.35 }}>
+              <Card className="stat-card hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300"><CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div><p className="text-xs text-muted-foreground font-medium">Customer Debt</p><p className="text-xl font-bold text-destructive"><AnimatedCounter value={totalDebt} prefix="KSh " /></p></div>
+                  <div className="h-10 w-10 rounded-lg bg-destructive/10 flex items-center justify-center"><CreditCard className="h-5 w-5 text-destructive" /></div>
+                </div>
+              </CardContent></Card>
+            </motion.div>
           </>
         )}
       </div>
@@ -440,5 +466,6 @@ export default function Dashboard() {
         </div>
       )}
     </div>
+    </AnimatedPage>
   );
 }
