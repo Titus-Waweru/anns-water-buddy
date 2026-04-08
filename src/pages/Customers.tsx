@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useCallback } from "react";
 import { useData } from "@/context/DataContext";
 import { useAuth } from "@/context/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,9 +9,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Users, Search, FileText, Phone, Mail, MapPin, Star, Pencil, Trash2 } from "lucide-react";
+import { Plus, Users, Search, FileText, Phone, Mail, MapPin, Star, Pencil, Trash2, Download, Printer } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { format } from "date-fns";
+import InvoicePDF from "@/components/InvoicePDF";
+import AnimatedPage from "@/components/AnimatedPage";
 
 export default function Customers() {
   const { customers, sales, addCustomer, updateCustomer, deleteCustomer } = useData();
@@ -104,7 +106,32 @@ export default function Customers() {
 
   const selectedCustomer = customers.find(c => c.id === detailCustomer);
 
+  const invoiceRef = useRef<HTMLDivElement>(null);
+
+  const handlePrintInvoice = useCallback(() => {
+    if (!invoiceRef.current) return;
+    const printContent = invoiceRef.current.innerHTML;
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) return;
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html><head><title>Invoice - ${selectedCustomer?.name || "Customer"}</title>
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; color: #1a1a1a; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { padding: 8px 12px; text-align: left; }
+        @media print { body { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
+      </style></head>
+      <body>${printContent}</body></html>
+    `);
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => { printWindow.print(); printWindow.close(); }, 250);
+  }, [selectedCustomer]);
+
   return (
+    <AnimatedPage>
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
@@ -286,36 +313,35 @@ export default function Customers() {
                     )}
                   </TabsContent>
                   {selectedCustomer.credit_balance > 0 && (
-                    <TabsContent value="invoice" className="mt-3">
-                      <Card className="border-2">
-                        <CardContent className="p-4 space-y-3">
-                          <div className="text-center border-b pb-3">
-                            <h3 className="font-bold text-lg">WONDER AQUA LTD</h3>
-                            <p className="text-xs text-muted-foreground">Outstanding Balance Invoice</p>
-                            <p className="text-xs text-muted-foreground">{format(new Date(), "dd MMMM yyyy")}</p>
-                          </div>
-                          <div className="text-sm space-y-1">
-                            <p><strong>Customer:</strong> {selectedCustomer.name}</p>
-                            {selectedCustomer.phone && <p><strong>Phone:</strong> {selectedCustomer.phone}</p>}
-                          </div>
-                          <div className="border-t pt-2">
-                            <h4 className="text-sm font-semibold mb-2">Credit Purchases:</h4>
-                            {customerSales.filter(s => s.payment_mode === "Credit").map(s => (
-                              <div key={s.id} className="flex justify-between text-sm">
-                                <span>{s.product_name} × {s.quantity} ({format(new Date(s.date), "dd/MM")})</span>
-                                <span>KSh {s.final_amount.toLocaleString()}</span>
-                              </div>
-                            ))}
-                          </div>
-                          <div className="border-t pt-2 flex justify-between font-bold text-lg">
-                            <span>Total Owed:</span>
-                            <span className="text-destructive">KSh {selectedCustomer.credit_balance.toLocaleString()}</span>
-                          </div>
-                          <Button variant="outline" className="w-full gap-2 mt-2" onClick={() => window.print()}>
-                            <FileText className="h-4 w-4" /> Print Invoice
-                          </Button>
-                        </CardContent>
-                      </Card>
+                    <TabsContent value="invoice" className="mt-3 space-y-3">
+                      <div className="border rounded-lg overflow-hidden">
+                        <InvoicePDF
+                          ref={invoiceRef}
+                          customer={{
+                            name: selectedCustomer.name,
+                            phone: selectedCustomer.phone,
+                            email: (selectedCustomer as any).email,
+                            address: (selectedCustomer as any).address,
+                            credit_balance: selectedCustomer.credit_balance,
+                          }}
+                          items={customerSales.filter(s => s.payment_mode === "Credit").map(s => ({
+                            product_name: s.product_name,
+                            quantity: s.quantity,
+                            selling_price: s.selling_price,
+                            final_amount: s.final_amount,
+                            date: s.date,
+                          }))}
+                          invoiceNumber={`INV-${selectedCustomer.id.slice(0, 8).toUpperCase()}`}
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        <Button variant="outline" className="flex-1 gap-2" onClick={handlePrintInvoice}>
+                          <Printer className="h-4 w-4" /> Print Invoice
+                        </Button>
+                        <Button variant="outline" className="flex-1 gap-2" onClick={handlePrintInvoice}>
+                          <Download className="h-4 w-4" /> Download PDF
+                        </Button>
+                      </div>
                     </TabsContent>
                   )}
                 </Tabs>
@@ -337,5 +363,6 @@ export default function Customers() {
         </DialogContent>
       </Dialog>
     </div>
+    </AnimatedPage>
   );
 }
