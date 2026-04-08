@@ -8,8 +8,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { AlertTriangle, Trash2, Loader2, ShieldAlert, Timer, Eye, EyeOff, Settings, Lock, CreditCard } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { AlertTriangle, Trash2, Loader2, ShieldAlert, Timer, Eye, EyeOff, Settings, Lock, CreditCard, BookOpen } from "lucide-react";
 import { toast } from "sonner";
+import AnimatedPage from "@/components/AnimatedPage";
 
 const RESET_TARGETS = [
   { key: "sales", label: "Sales Records", table: "sales" },
@@ -42,12 +44,15 @@ export default function SystemControl() {
   const [countdownDays, setCountdownDays] = useState(0);
   const [currentCountdown, setCurrentCountdown] = useState<{ end_date: string; remaining: number } | null>(null);
 
+  // Subscription visibility
+  const [subVisible, setSubVisible] = useState(false);
+
   useEffect(() => {
     if (!isSuperAdmin) return;
     // Load M-Pesa settings
     supabase.from("system_settings").select("*").in("setting_key", [
       "mpesa_consumer_key", "mpesa_consumer_secret", "mpesa_shortcode", "mpesa_passkey",
-      "system_countdown_end", "paystack_public_key",
+      "system_countdown_end", "paystack_public_key", "subscription_visible",
     ]).then(({ data }) => {
       const vals: Record<string, string> = {};
       data?.forEach(s => { vals[s.setting_key] = s.setting_value; });
@@ -63,6 +68,7 @@ export default function SystemControl() {
         setCurrentCountdown({ end_date: vals.system_countdown_end, remaining });
       }
       setPaystackKey(vals.paystack_public_key || "");
+      setSubVisible(vals.subscription_visible === "true");
     });
   }, [isSuperAdmin]);
 
@@ -130,7 +136,19 @@ export default function SystemControl() {
 
   const maskValue = (val: string) => val ? "•".repeat(Math.min(val.length, 20)) : "";
 
+  const toggleSubVisibility = async (checked: boolean) => {
+    setSubVisible(checked);
+    const { data } = await supabase.from("system_settings").select("id").eq("setting_key", "subscription_visible").maybeSingle();
+    if (data) {
+      await supabase.from("system_settings").update({ setting_value: checked ? "true" : "false", updated_by: user!.id }).eq("setting_key", "subscription_visible");
+    } else {
+      await supabase.from("system_settings").insert({ setting_key: "subscription_visible", setting_value: checked ? "true" : "false", updated_by: user!.id });
+    }
+    toast.success(checked ? "Subscription visible to supervisors" : "Subscription hidden from supervisors");
+  };
+
   return (
+    <AnimatedPage>
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-center gap-3">
         <ShieldAlert className="h-7 w-7 text-destructive" />
@@ -140,13 +158,40 @@ export default function SystemControl() {
         </div>
       </div>
 
-      <Tabs defaultValue="paystack" className="space-y-4">
-        <TabsList className="grid grid-cols-4 w-full max-w-lg">
+      <Tabs defaultValue="visibility" className="space-y-4">
+        <TabsList className="grid grid-cols-5 w-full max-w-2xl">
+          <TabsTrigger value="visibility"><Eye className="h-3 w-3 mr-1" /> Visibility</TabsTrigger>
           <TabsTrigger value="paystack"><CreditCard className="h-3 w-3 mr-1" /> Paystack</TabsTrigger>
           <TabsTrigger value="mpesa"><Lock className="h-3 w-3 mr-1" /> M-Pesa</TabsTrigger>
           <TabsTrigger value="countdown"><Timer className="h-3 w-3 mr-1" /> Countdown</TabsTrigger>
           <TabsTrigger value="reset"><Trash2 className="h-3 w-3 mr-1" /> Reset</TabsTrigger>
         </TabsList>
+
+        {/* Subscription Visibility Control */}
+        <TabsContent value="visibility">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2"><Eye className="h-5 w-5" /> Subscription Visibility</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">Control who can see subscription status. Superadmin always has visibility.</p>
+              <div className="flex items-center justify-between p-4 rounded-lg border">
+                <div>
+                  <p className="font-medium text-foreground">Show to Supervisors</p>
+                  <p className="text-xs text-muted-foreground">When enabled, supervisors can see subscription status on the dashboard</p>
+                </div>
+                <Switch checked={subVisible} onCheckedChange={toggleSubVisibility} />
+              </div>
+              <div className="bg-muted/50 rounded-lg p-4 text-sm space-y-1">
+                <p className="font-medium text-foreground">Visibility Rules:</p>
+                <p className="text-muted-foreground">✅ Superadmin — Always visible</p>
+                <p className="text-muted-foreground">{subVisible ? "✅" : "❌"} Supervisor — {subVisible ? "Visible" : "Hidden"}</p>
+                <p className="text-muted-foreground">❌ Cashier — Always hidden</p>
+                <p className="text-muted-foreground">❌ Stock Manager — Always hidden</p>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         {/* Paystack Public Key */}
         <TabsContent value="paystack">
@@ -282,5 +327,6 @@ export default function SystemControl() {
         </TabsContent>
       </Tabs>
     </div>
+    </AnimatedPage>
   );
 }
