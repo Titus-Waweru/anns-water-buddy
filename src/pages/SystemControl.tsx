@@ -157,6 +157,11 @@ export default function SystemControl() {
           <h1 className="text-2xl font-bold text-foreground">System Control</h1>
           <p className="text-sm text-muted-foreground">Superadmin-only system management</p>
         </div>
+        <div className="ml-auto">
+          <Button variant="outline" className="gap-2" onClick={generateSystemManual}>
+            <BookOpen className="h-4 w-4" /> System Manual
+          </Button>
+        </div>
       </div>
 
       <Tabs defaultValue="visibility" className="space-y-4">
