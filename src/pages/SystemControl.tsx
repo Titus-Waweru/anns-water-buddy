@@ -12,6 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { AlertTriangle, Trash2, Loader2, ShieldAlert, Timer, Eye, EyeOff, Settings, Lock, CreditCard, BookOpen } from "lucide-react";
 import { toast } from "sonner";
 import AnimatedPage from "@/components/AnimatedPage";
+import { generateSystemManual } from "@/lib/systemManual";
 
 const RESET_TARGETS = [
   { key: "sales", label: "Sales Records", table: "sales" },
