@@ -76,12 +76,15 @@ export default function LandingPage() {
       {/* Footer */}
       <footer className="border-t bg-card/50 backdrop-blur-sm py-8">
         <div className="max-w-6xl mx-auto px-4 space-y-4">
-          <div className="flex items-center justify-between text-sm text-muted-foreground">
+          <div className="flex items-center justify-between text-sm text-muted-foreground flex-wrap gap-2">
             <div className="flex items-center gap-2">
               <Droplets className="h-4 w-4 text-secondary" />
               <span>Wonder Aqua LTD © {new Date().getFullYear()}</span>
             </div>
-            <span>Water Distribution Management</span>
+            <div className="flex items-center gap-4">
+              <Link to="/privacy-policy" className="hover:text-foreground transition-colors">Privacy Policy</Link>
+              <Link to="/terms-and-conditions" className="hover:text-foreground transition-colors">Terms & Conditions</Link>
+            </div>
           </div>
           <div className="text-center">
             <p className="text-xs italic text-muted-foreground/60">
