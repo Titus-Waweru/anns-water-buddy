@@ -20,7 +20,6 @@ export default async function handler(req, res) {
   console.log('BODY:', JSON.stringify(req.body, null, 2));
 
   try {
-    // Always accept POST only
     if (req.method !== 'POST') {
       return res.status(200).json({
         ResultCode: 0,
@@ -30,7 +29,6 @@ export default async function handler(req, res) {
 
     const body = req.body || {};
 
-    // Extract stkCallback safely
     const stkCallback = body?.Body?.stkCallback;
 
     if (!stkCallback) {
@@ -43,7 +41,6 @@ export default async function handler(req, res) {
 
     const items = stkCallback.CallbackMetadata?.Item || [];
 
-    // Helper to extract values
     const getValue = (name) => {
       const item = items.find((i) => i.Name === name);
       return item ? item.Value : null;
@@ -68,6 +65,18 @@ export default async function handler(req, res) {
       resultDescription,
     });
 
+    // 🧠 FIXED DATE HANDLING (IMPORTANT)
+    const safeTransactionDate = transactionDate
+      ? new Date(
+          transactionDate.substring(0, 4) + '-' +
+          transactionDate.substring(4, 6) + '-' +
+          transactionDate.substring(6, 8) + 'T' +
+          transactionDate.substring(8, 10) + ':' +
+          transactionDate.substring(10, 12) + ':' +
+          transactionDate.substring(12, 14)
+        ).toISOString()
+      : new Date().toISOString();
+
     // Save to Supabase
     if (supabase && amount && phoneNumber) {
       const { error } = await supabase.from('mpesa_transactions').insert([
@@ -75,7 +84,10 @@ export default async function handler(req, res) {
           amount: Number(amount) || 0,
           mpesa_receipt_number: mpesaReceiptNumber,
           phone_number: String(phoneNumber),
-          transaction_date: transactionDate,
+
+          // ✅ FIXED LINE
+          transaction_date: safeTransactionDate,
+
           result_code: resultCode,
           result_description: resultDescription,
           merchant_request_id: merchantRequestId,
@@ -93,7 +105,6 @@ export default async function handler(req, res) {
       console.warn('⚠️ Skipping DB insert (missing data or Supabase not ready)');
     }
 
-    // ALWAYS respond OK to M-PESA
     return res.status(200).json({
       ResultCode: 0,
       ResultDesc: 'Accepted',
@@ -102,7 +113,6 @@ export default async function handler(req, res) {
   } catch (error) {
     console.error('❌ Callback error:', error);
 
-    // STILL return 200 (important for M-PESA)
     return res.status(200).json({
       ResultCode: 0,
       ResultDesc: 'Accepted',
