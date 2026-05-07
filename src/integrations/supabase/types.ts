@@ -296,47 +296,68 @@ export type Database = {
           },
         ]
       }
-      mpesa_transactions: {
+      payments: {
         Row: {
           amount: number
-          checkout_request_id: string | null
+          branch_id: string | null
           created_at: string
           id: string
-          merchant_request_id: string | null
-          mpesa_receipt_number: string
+          initiated_by: string | null
+          message_reference: string
+          narration: string | null
+          operator_code: string | null
           phone_number: string
-          raw_callback_data: Json | null
-          result_code: number
+          provider: string
+          raw_payload: Json | null
+          raw_request: Json | null
+          result_code: string | null
           result_description: string | null
-          transaction_date: string
+          sale_id: string | null
+          status: string
+          transaction_currency: string
+          transaction_date: string | null
           updated_at: string
         }
         Insert: {
-          amount: number
-          checkout_request_id?: string | null
+          amount?: number
+          branch_id?: string | null
           created_at?: string
           id?: string
-          merchant_request_id?: string | null
-          mpesa_receipt_number: string
+          initiated_by?: string | null
+          message_reference: string
+          narration?: string | null
+          operator_code?: string | null
           phone_number: string
-          raw_callback_data?: Json | null
-          result_code?: number
+          provider?: string
+          raw_payload?: Json | null
+          raw_request?: Json | null
+          result_code?: string | null
           result_description?: string | null
-          transaction_date: string
+          sale_id?: string | null
+          status?: string
+          transaction_currency?: string
+          transaction_date?: string | null
           updated_at?: string
         }
         Update: {
           amount?: number
-          checkout_request_id?: string | null
+          branch_id?: string | null
           created_at?: string
           id?: string
-          merchant_request_id?: string | null
-          mpesa_receipt_number?: string
+          initiated_by?: string | null
+          message_reference?: string
+          narration?: string | null
+          operator_code?: string | null
           phone_number?: string
-          raw_callback_data?: Json | null
-          result_code?: number
+          provider?: string
+          raw_payload?: Json | null
+          raw_request?: Json | null
+          result_code?: string | null
           result_description?: string | null
-          transaction_date?: string
+          sale_id?: string | null
+          status?: string
+          transaction_currency?: string
+          transaction_date?: string | null
           updated_at?: string
         }
         Relationships: []
@@ -585,6 +606,7 @@ export type Database = {
           final_amount: number
           id: string
           payment_mode: Database["public"]["Enums"]["payment_mode"]
+          payment_status: string
           product_id: string
           product_name: string
           profit: number
@@ -606,6 +628,7 @@ export type Database = {
           final_amount: number
           id?: string
           payment_mode?: Database["public"]["Enums"]["payment_mode"]
+          payment_status?: string
           product_id: string
           product_name: string
           profit: number
@@ -627,6 +650,7 @@ export type Database = {
           final_amount?: number
           id?: string
           payment_mode?: Database["public"]["Enums"]["payment_mode"]
+          payment_status?: string
           product_id?: string
           product_name?: string
           profit?: number
