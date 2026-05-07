@@ -296,6 +296,51 @@ export type Database = {
           },
         ]
       }
+      mpesa_transactions: {
+        Row: {
+          amount: number
+          checkout_request_id: string | null
+          created_at: string
+          id: string
+          merchant_request_id: string | null
+          mpesa_receipt_number: string
+          phone_number: string
+          raw_callback_data: Json | null
+          result_code: number
+          result_description: string | null
+          transaction_date: string
+          updated_at: string
+        }
+        Insert: {
+          amount: number
+          checkout_request_id?: string | null
+          created_at?: string
+          id?: string
+          merchant_request_id?: string | null
+          mpesa_receipt_number: string
+          phone_number: string
+          raw_callback_data?: Json | null
+          result_code?: number
+          result_description?: string | null
+          transaction_date: string
+          updated_at?: string
+        }
+        Update: {
+          amount?: number
+          checkout_request_id?: string | null
+          created_at?: string
+          id?: string
+          merchant_request_id?: string | null
+          mpesa_receipt_number?: string
+          phone_number?: string
+          raw_callback_data?: Json | null
+          result_code?: number
+          result_description?: string | null
+          transaction_date?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       production_records: {
         Row: {
           bales: number
