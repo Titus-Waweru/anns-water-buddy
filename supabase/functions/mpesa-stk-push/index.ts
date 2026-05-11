@@ -1,0 +1,206 @@
+// Co-op Bank OpenAPI STK Push initiator
+// Creates a PENDING payment record linked to a sale, then triggers STK push.
+
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
+};
+
+function normalizePhone(p: string): string {
+  const digits = String(p).replace(/\D/g, "");
+  if (digits.startsWith("254")) return digits;
+  if (digits.startsWith("0")) return "254" + digits.slice(1);
+  if (digits.startsWith("7") || digits.startsWith("1")) return "254" + digits;
+  return digits;
+}
+
+async function getCoopToken(baseUrl: string, key: string, secret: string) {
+  const creds = btoa(`${key}:${secret}`);
+  const res = await fetch(`${baseUrl}/token?grant_type=client_credentials`, {
+    headers: { Authorization: `Basic ${creds}` },
+  });
+  const data = await res.json();
+  if (!res.ok || !data.access_token) {
+    throw new Error(`Token failed: ${JSON.stringify(data)}`);
+  }
+  return data.access_token as string;
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  try {
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const body = await req.json();
+    const { sale_id, amount, phone, narration } = body || {};
+
+    if (!sale_id || !amount || !phone) {
+      return new Response(
+        JSON.stringify({ error: "sale_id, amount and phone are required" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+
+    // Verify caller
+    const userClient = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: claims } = await userClient.auth.getClaims(authHeader.replace("Bearer ", ""));
+    if (!claims?.claims?.sub) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const admin = createClient(supabaseUrl, serviceKey);
+
+    // Prevent duplicate pending payment for same sale
+    const { data: existing } = await admin
+      .from("payments")
+      .select("id, message_reference, status")
+      .eq("sale_id", sale_id)
+      .in("status", ["PENDING", "SUCCESS"])
+      .maybeSingle();
+
+    if (existing && existing.status === "SUCCESS") {
+      return new Response(
+        JSON.stringify({ error: "Sale already paid", message_reference: existing.message_reference }),
+        { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    const messageReference =
+      existing?.message_reference || `WA-${sale_id.slice(0, 8)}-${Date.now()}`;
+    const normalizedPhone = normalizePhone(phone);
+
+    // Build the exact Co-op payload
+    const callbackUrl =
+      Deno.env.get("COOP_CALLBACK_URL") ||
+      `${supabaseUrl}/functions/v1/mpesa-callback`;
+
+    const coopPayload = {
+      MessageReference: messageReference,
+      CallBackUrl: callbackUrl,
+      AccountReference: sale_id.slice(0, 12),
+      Amount: Number(amount),
+      MSISDN: normalizedPhone,
+      Currency: "KES",
+      Narration: narration || `Sale ${sale_id.slice(0, 8)}`,
+    };
+
+    // Upsert PENDING payment row
+    if (existing) {
+      await admin
+        .from("payments")
+        .update({
+          amount: Number(amount),
+          phone_number: normalizedPhone,
+          status: "PENDING",
+          raw_request: coopPayload,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", existing.id);
+    } else {
+      await admin.from("payments").insert({
+        provider: "coop",
+        sale_id,
+        amount: Number(amount),
+        phone_number: normalizedPhone,
+        message_reference: messageReference,
+        transaction_currency: "KES",
+        status: "PENDING",
+        narration: coopPayload.Narration,
+        initiated_by: claims.claims.sub,
+        raw_request: coopPayload,
+      });
+    }
+
+    // Trigger Co-op STK
+    const baseUrl = Deno.env.get("COOP_BASE_URL");
+    const consumerKey = Deno.env.get("COOP_CONSUMER_KEY");
+    const consumerSecret = Deno.env.get("COOP_CONSUMER_SECRET");
+
+    if (!baseUrl || !consumerKey || !consumerSecret) {
+      // Credentials not yet configured — payment row is still created so
+      // the callback flow can be tested independently.
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          pending: true,
+          message_reference: messageReference,
+          warning: "Co-op credentials not configured. STK push not sent.",
+        }),
+        { status: 202, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    try {
+      const token = await getCoopToken(baseUrl, consumerKey, consumerSecret);
+      const stkRes = await fetch(`${baseUrl}/stk/push`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(coopPayload),
+      });
+      const stkData = await stkRes.json();
+      console.log("Co-op STK response:", stkData);
+
+      if (!stkRes.ok) {
+        await admin
+          .from("payments")
+          .update({
+            status: "FAILED",
+            result_description: stkData?.ResultDesc || "STK push request failed",
+            raw_payload: stkData,
+          })
+          .eq("message_reference", messageReference);
+
+        return new Response(
+          JSON.stringify({ error: "STK push failed", details: stkData }),
+          { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      return new Response(
+        JSON.stringify({ ok: true, message_reference: messageReference, response: stkData }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    } catch (err) {
+      console.error("STK error:", err);
+      await admin
+        .from("payments")
+        .update({
+          status: "FAILED",
+          result_description: String((err as Error).message),
+        })
+        .eq("message_reference", messageReference);
+      return new Response(
+        JSON.stringify({ error: String((err as Error).message) }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+  } catch (e) {
+    console.error("mpesa-stk-push error:", e);
+    return new Response(JSON.stringify({ error: String((e as Error).message) }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+});
