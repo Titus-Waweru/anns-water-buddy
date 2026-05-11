@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useData } from "@/context/DataContext";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Plus, ShoppingCart, Printer, Smartphone } from "lucide-react";
+import { Plus, ShoppingCart, Printer, Smartphone, Loader2, RefreshCw } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import SaleReceipt from "@/components/SaleReceipt";
@@ -18,13 +18,14 @@ type PaymentMode = "Cash" | "Mpesa" | "Credit";
 type DiscountType = "percentage" | "fixed";
 
 export default function Sales() {
-  const { products, customers, sales, addSale } = useData();
+  const { products, customers, sales, addSale, refetch, effectiveBranchId } = useData();
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const [receiptData, setReceiptData] = useState<any>(null);
-  const [hasDaraja, setHasDaraja] = useState(false);
   const [mpesaPhone, setMpesaPhone] = useState("");
-  const [mpesaCode, setMpesaCode] = useState("");
+  const [stkPending, setStkPending] = useState<{ saleId: string; messageRef: string } | null>(null);
+  const [stkStatus, setStkStatus] = useState<"idle" | "sending" | "waiting" | "failed">("idle");
+  const pollRef = useRef<number | null>(null);
   const [form, setForm] = useState({
     customerId: "",
     productId: "",
@@ -33,12 +34,6 @@ export default function Sales() {
     discountValue: 0,
     paymentMode: "Cash" as PaymentMode,
   });
-
-  // Check if Daraja is configured
-  useEffect(() => {
-    supabase.from("system_settings").select("setting_value").eq("setting_key", "mpesa_consumer_key").maybeSingle()
-      .then(({ data }) => { setHasDaraja(!!data?.setting_value); });
-  }, []);
 
   const selectedProduct = products.find(p => p.id === form.productId);
   const selectedCustomer = customers.find(c => c.id === form.customerId);
@@ -52,6 +47,119 @@ export default function Sales() {
     ? (selectedProduct.selling_price - selectedProduct.buying_price) * form.quantity - discountAmount
     : 0;
 
+  // ---- Finalize a paid sale: deduct inventory, log, award loyalty, show receipt ----
+  const finalizeSale = async (saleId: string) => {
+    const { data: sale } = await supabase.from("sales").select("*").eq("id", saleId).maybeSingle();
+    if (!sale) return;
+
+    const product = products.find(p => p.id === sale.product_id);
+    if (product) {
+      await supabase.from("products")
+        .update({ quantity: Math.max(0, product.quantity - sale.quantity) })
+        .eq("id", sale.product_id);
+      await supabase.from("inventory_logs").insert({
+        product_id: sale.product_id,
+        product_name: sale.product_name,
+        type: "OUT",
+        quantity: sale.quantity,
+        reference: `Sale to ${sale.customer_name || "Walk-in"}`,
+        date: sale.date,
+        branch_id: sale.branch_id,
+      });
+    }
+
+    const loyaltyPoints = Math.floor(sale.final_amount / 100);
+    if (sale.customer_id && loyaltyPoints > 0) {
+      await supabase.from("loyalty_points").insert({
+        customer_id: sale.customer_id,
+        sale_id: sale.id,
+        points: loyaltyPoints,
+        description: `Sale: ${sale.product_name} × ${sale.quantity}`,
+      });
+      const cust = customers.find(c => c.id === sale.customer_id);
+      const newTotal = (cust?.loyalty_points || 0) + loyaltyPoints;
+      await supabase.from("customers").update({ loyalty_points: newTotal }).eq("id", sale.customer_id);
+    }
+
+    const totalLoyalty = (selectedCustomer?.loyalty_points || 0) + loyaltyPoints;
+    setReceiptData({
+      id: sale.id,
+      customerName: sale.customer_name || "Walk-in",
+      productName: sale.product_name,
+      quantity: sale.quantity,
+      sellingPrice: sale.selling_price,
+      totalAmount: sale.total_amount,
+      discountAmount: sale.discount_amount,
+      finalAmount: sale.final_amount,
+      paymentMode: sale.payment_mode,
+      profit: sale.profit,
+      loyaltyPoints,
+      totalLoyaltyPoints: totalLoyalty,
+      rewardMessage: totalLoyalty >= 100 ? "🎉 Eligible for loyalty reward!" : null,
+      date: sale.date,
+    });
+    refetch();
+  };
+
+  // ---- Poll for STK payment status ----
+  useEffect(() => {
+    if (!stkPending) return;
+    let attempts = 0;
+    const tick = async () => {
+      attempts++;
+      const { data } = await supabase
+        .from("payments")
+        .select("status, result_description")
+        .eq("message_reference", stkPending.messageRef)
+        .maybeSingle();
+
+      if (data?.status === "SUCCESS") {
+        if (pollRef.current) window.clearInterval(pollRef.current);
+        setStkStatus("idle");
+        toast.success("Payment confirmed!");
+        await finalizeSale(stkPending.saleId);
+        setStkPending(null);
+        setOpen(false);
+        return;
+      }
+      if (data?.status === "FAILED") {
+        if (pollRef.current) window.clearInterval(pollRef.current);
+        setStkStatus("failed");
+        toast.error(data.result_description || "Payment failed");
+        return;
+      }
+      // Timeout after ~2 minutes
+      if (attempts > 40) {
+        if (pollRef.current) window.clearInterval(pollRef.current);
+        setStkStatus("failed");
+        toast.error("Payment timed out. You can retry.");
+      }
+    };
+    pollRef.current = window.setInterval(tick, 3000);
+    return () => { if (pollRef.current) window.clearInterval(pollRef.current); };
+  }, [stkPending]);
+
+  const sendStkPush = async (saleId: string, phone: string, amount: number) => {
+    setStkStatus("sending");
+    const { data, error } = await supabase.functions.invoke("mpesa-stk-push", {
+      body: { sale_id: saleId, amount, phone, narration: `Sale ${saleId.slice(0, 8)}` },
+    });
+    if (error || (data?.error && !data?.message_reference)) {
+      setStkStatus("failed");
+      toast.error(error?.message || data?.error || "STK push failed");
+      return;
+    }
+    if (data?.warning) toast.info(data.warning);
+    setStkPending({ saleId, messageRef: data.message_reference });
+    setStkStatus("waiting");
+    toast.success("STK push sent. Check your phone.");
+  };
+
+  const retryStk = async () => {
+    if (!stkPending) return;
+    await sendStkPush(stkPending.saleId, mpesaPhone, finalAmount);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedProduct || form.quantity < 1) return;
@@ -59,10 +167,8 @@ export default function Sales() {
       toast.error("Not enough stock available");
       return;
     }
-
-    // For Mpesa manual mode, require transaction code
-    if (form.paymentMode === "Mpesa" && !hasDaraja && !mpesaCode.trim()) {
-      toast.error("Enter M-Pesa transaction code");
+    if (form.paymentMode === "Mpesa" && !mpesaPhone.trim()) {
+      toast.error("Enter customer phone number for STK push");
       return;
     }
 
@@ -84,9 +190,29 @@ export default function Sales() {
       date: new Date().toISOString(),
     };
 
+    if (form.paymentMode === "Mpesa") {
+      // Insert PENDING sale directly (skip context — it deducts inventory)
+      const { data: sale, error } = await supabase
+        .from("sales")
+        .insert({
+          ...saleData,
+          branch_id: effectiveBranchId,
+          recorded_by: user?.id,
+          payment_status: "PENDING",
+        })
+        .select()
+        .single();
+      if (error || !sale) {
+        toast.error(error?.message || "Could not create sale");
+        return;
+      }
+      await sendStkPush(sale.id, mpesaPhone, finalAmount);
+      return;
+    }
+
+    // Cash / Credit — standard path (PAID, deducts inventory in context)
     await addSale(saleData);
 
-    // Award loyalty points (1 point per 100 KSh)
     const loyaltyPoints = Math.floor(finalAmount / 100);
     if (form.customerId && loyaltyPoints > 0) {
       await supabase.from("loyalty_points").insert({
@@ -99,8 +225,6 @@ export default function Sales() {
     }
 
     const totalLoyalty = (selectedCustomer?.loyalty_points || 0) + loyaltyPoints;
-    const rewardMessage = totalLoyalty >= 100 ? "🎉 Eligible for loyalty reward!" : null;
-
     setReceiptData({
       id: crypto.randomUUID(),
       customerName: selectedCustomer?.name || "Walk-in",
@@ -114,15 +238,26 @@ export default function Sales() {
       profit,
       loyaltyPoints,
       totalLoyaltyPoints: totalLoyalty,
-      rewardMessage,
-      mpesaCode: form.paymentMode === "Mpesa" ? mpesaCode : undefined,
+      rewardMessage: totalLoyalty >= 100 ? "🎉 Eligible for loyalty reward!" : null,
       date: new Date().toISOString(),
     });
 
     toast.success("Sale recorded successfully!");
     setForm({ customerId: "", productId: "", quantity: 1, discountType: "fixed", discountValue: 0, paymentMode: "Cash" });
-    setMpesaPhone(""); setMpesaCode("");
+    setMpesaPhone("");
     setOpen(false);
+  };
+
+  const closeDialog = () => {
+    if (stkStatus === "waiting" || stkStatus === "sending") {
+      toast.info("Payment still pending. Cancel by retrying or wait for callback.");
+      return;
+    }
+    setOpen(false);
+    setStkPending(null);
+    setStkStatus("idle");
+    setForm({ customerId: "", productId: "", quantity: 1, discountType: "fixed", discountValue: 0, paymentMode: "Cash" });
+    setMpesaPhone("");
   };
 
   return (
@@ -132,12 +267,41 @@ export default function Sales() {
           <h1 className="text-2xl font-bold text-foreground">Sales</h1>
           <p className="text-sm text-muted-foreground">Record and track your sales</p>
         </div>
-        <Dialog open={open} onOpenChange={setOpen}>
+        <Dialog open={open} onOpenChange={v => v ? setOpen(true) : closeDialog()}>
           <DialogTrigger asChild>
             <Button className="gap-2"><Plus className="h-4 w-4" /> New Sale</Button>
           </DialogTrigger>
           <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
             <DialogHeader><DialogTitle>Record Sale</DialogTitle></DialogHeader>
+
+            {/* STK in progress overlay */}
+            {stkPending && (stkStatus === "waiting" || stkStatus === "sending") && (
+              <Card className="bg-primary/5 border-primary/20">
+                <CardContent className="p-4 text-center space-y-2">
+                  <Loader2 className="h-8 w-8 mx-auto text-primary animate-spin" />
+                  <p className="font-medium">Awaiting payment confirmation…</p>
+                  <p className="text-xs text-muted-foreground">
+                    STK push sent to {mpesaPhone}. Ref: {stkPending.messageRef}
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+
+            {stkPending && stkStatus === "failed" && (
+              <Card className="bg-destructive/5 border-destructive/30">
+                <CardContent className="p-4 text-center space-y-3">
+                  <p className="font-medium text-destructive">Payment not completed</p>
+                  <div className="flex gap-2 justify-center">
+                    <Button size="sm" variant="outline" onClick={retryStk} className="gap-2">
+                      <RefreshCw className="h-4 w-4" /> Retry STK Push
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={closeDialog}>Cancel</Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {!stkPending && (
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <Label>Customer (optional)</Label>
@@ -172,31 +336,27 @@ export default function Sales() {
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="Cash">Cash</SelectItem>
-                      <SelectItem value="Mpesa">Mpesa</SelectItem>
+                      <SelectItem value="Mpesa">M-Pesa (STK Push)</SelectItem>
                       <SelectItem value="Credit">Credit</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
               </div>
 
-              {/* M-Pesa fields */}
               {form.paymentMode === "Mpesa" && (
                 <Card className="bg-primary/5 border-primary/20">
                   <CardContent className="p-3 space-y-3">
                     <div className="flex items-center gap-2 text-sm font-medium text-foreground">
                       <Smartphone className="h-4 w-4 text-primary" />
-                      {hasDaraja ? "STK Push Available" : "Manual M-Pesa Entry"}
+                      Co-op Bank STK Push
                     </div>
                     <div>
-                      <Label>Phone Number</Label>
-                      <Input value={mpesaPhone} onChange={e => setMpesaPhone(e.target.value)} placeholder="e.g. 254712345678" />
+                      <Label>Customer Phone *</Label>
+                      <Input value={mpesaPhone} onChange={e => setMpesaPhone(e.target.value)} placeholder="e.g. 0712345678" />
                     </div>
-                    {!hasDaraja && (
-                      <div>
-                        <Label>Transaction Code *</Label>
-                        <Input value={mpesaCode} onChange={e => setMpesaCode(e.target.value.toUpperCase())} placeholder="e.g. QHL34D2K9R" className="font-mono" />
-                      </div>
-                    )}
+                    <p className="text-xs text-muted-foreground">
+                      Customer will get an STK prompt. Sale finalizes only after payment confirmation.
+                    </p>
                   </CardContent>
                 </Card>
               )}
@@ -230,13 +390,15 @@ export default function Sales() {
                 </Card>
               )}
 
-              <Button type="submit" className="w-full" disabled={!form.productId}>Record Sale</Button>
+              <Button type="submit" className="w-full" disabled={!form.productId || stkStatus === "sending"}>
+                {form.paymentMode === "Mpesa" ? "Send STK Push" : "Record Sale"}
+              </Button>
             </form>
+            )}
           </DialogContent>
         </Dialog>
       </div>
 
-      {/* Receipt Dialog */}
       {receiptData && (
         <Dialog open={!!receiptData} onOpenChange={() => setReceiptData(null)}>
           <DialogContent className="max-w-sm">
@@ -266,8 +428,13 @@ export default function Sales() {
                   <div className="text-right flex items-center gap-2 shrink-0">
                     <div>
                       <p className="font-bold text-foreground">KSh {s.final_amount.toLocaleString()}</p>
-                      <div className="flex gap-1 justify-end">
+                      <div className="flex gap-1 justify-end flex-wrap">
                         <Badge variant="outline" className="text-[10px]">{s.payment_mode}</Badge>
+                        {s.payment_status && s.payment_status !== "PAID" && (
+                          <Badge variant={s.payment_status === "PENDING" ? "secondary" : "destructive"} className="text-[10px]">
+                            {s.payment_status}
+                          </Badge>
+                        )}
                         <Badge className="text-[10px] bg-success">+KSh {s.profit.toLocaleString()}</Badge>
                       </div>
                     </div>

@@ -1,121 +1,87 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Initialize Supabase safely
 let supabase = null;
-
 try {
-  const supabaseUrl = process.env.MPESA_SUPABASE_URL;
-  const supabaseServiceKey = process.env.MPESA_SUPABASE_SERVICE_KEY;
-
-  if (supabaseUrl && supabaseServiceKey) {
-    supabase = createClient(supabaseUrl, supabaseServiceKey);
-  }
-} catch (error) {
-  console.error('❌ Failed to initialize Supabase:', error);
+  const url = process.env.MPESA_SUPABASE_URL || process.env.SUPABASE_URL;
+  const key = process.env.MPESA_SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (url && key) supabase = createClient(url, key);
+} catch (e) {
+  console.error('Supabase init failed:', e);
 }
 
 export default async function handler(req, res) {
-  console.log('🔥 M-PESA CALLBACK RECEIVED');
-  console.log('METHOD:', req.method);
-  console.log('BODY:', JSON.stringify(req.body, null, 2));
+  const ack = () => res.status(200).json({ ResultCode: 0, ResultDesc: 'Accepted' });
 
   try {
-    if (req.method !== 'POST') {
-      return res.status(200).json({
-        ResultCode: 0,
-        ResultDesc: 'Accepted',
-      });
-    }
-
+    if (req.method !== 'POST') return ack();
     const body = req.body || {};
+    console.log('Callback received:', JSON.stringify(body));
 
-    const stkCallback = body?.Body?.stkCallback;
+    let messageReference = null, resultCode = null, resultDesc = null;
+    let amount = null, phone = null, transactionDate = null, receipt = null;
 
-    if (!stkCallback) {
-      console.log('⚠️ No stkCallback found');
-      return res.status(200).json({
-        ResultCode: 0,
-        ResultDesc: 'Accepted',
-      });
+    const coop = body?.Data || body;
+    if (coop?.MessageReference) {
+      messageReference = String(coop.MessageReference);
+      resultCode = coop.ResultCode ?? coop.StatusCode ?? null;
+      resultDesc = coop.ResultDesc ?? coop.StatusDescription ?? null;
+      amount = coop.Amount != null ? Number(coop.Amount) : null;
+      phone = coop.MSISDN ? String(coop.MSISDN) : null;
+      transactionDate = coop.MessageDateTime || coop.TransactionDate || null;
+      receipt = coop.TransactionID || coop.ThirdPartyTransID || null;
     }
 
-    const items = stkCallback.CallbackMetadata?.Item || [];
-
-    const getValue = (name) => {
-      const item = items.find((i) => i.Name === name);
-      return item ? item.Value : null;
-    };
-
-    const amount = getValue('Amount');
-    const mpesaReceiptNumber = getValue('MpesaReceiptNumber');
-    const phoneNumber = getValue('PhoneNumber');
-    const transactionDate = getValue('TransactionDate');
-
-    const resultCode = stkCallback.ResultCode ?? 0;
-    const resultDescription = stkCallback.ResultDesc ?? 'Accepted';
-    const merchantRequestId = stkCallback.MerchantRequestID ?? null;
-    const checkoutRequestId = stkCallback.CheckoutRequestID ?? null;
-
-    console.log('📦 Extracted Data:', {
-      amount,
-      mpesaReceiptNumber,
-      phoneNumber,
-      transactionDate,
-      resultCode,
-      resultDescription,
-    });
-
-    // 🧠 FIXED DATE HANDLING (IMPORTANT)
-    const safeTransactionDate = transactionDate
-      ? new Date(
-          transactionDate.substring(0, 4) + '-' +
-          transactionDate.substring(4, 6) + '-' +
-          transactionDate.substring(6, 8) + 'T' +
-          transactionDate.substring(8, 10) + ':' +
-          transactionDate.substring(10, 12) + ':' +
-          transactionDate.substring(12, 14)
-        ).toISOString()
-      : new Date().toISOString();
-
-    // Save to Supabase
-    if (supabase && amount && phoneNumber) {
-      const { error } = await supabase.from('mpesa_transactions').insert([
-        {
-          amount: Number(amount) || 0,
-          mpesa_receipt_number: mpesaReceiptNumber,
-          phone_number: String(phoneNumber),
-
-          // ✅ FIXED LINE
-          transaction_date: safeTransactionDate,
-
-          result_code: resultCode,
-          result_description: resultDescription,
-          merchant_request_id: merchantRequestId,
-          checkout_request_id: checkoutRequestId,
-          raw_callback_data: body,
-        },
-      ]);
-
-      if (error) {
-        console.error('❌ Supabase insert error:', error);
-      } else {
-        console.log('✅ Transaction saved successfully');
+    const stk = body?.Body?.stkCallback;
+    if (!messageReference && stk) {
+      resultCode = stk.ResultCode ?? null;
+      resultDesc = stk.ResultDesc ?? null;
+      messageReference = stk.MerchantRequestID || stk.CheckoutRequestID || null;
+      const items = stk.CallbackMetadata?.Item || [];
+      const get = (n) => items.find((i) => i.Name === n)?.Value;
+      amount = get('Amount') != null ? Number(get('Amount')) : null;
+      phone = get('PhoneNumber') ? String(get('PhoneNumber')) : null;
+      receipt = get('MpesaReceiptNumber') ? String(get('MpesaReceiptNumber')) : null;
+      const td = get('TransactionDate');
+      if (td) {
+        const s = String(td);
+        transactionDate = `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}T${s.slice(8,10)}:${s.slice(10,12)}:${s.slice(12,14)}Z`;
       }
-    } else {
-      console.warn('⚠️ Skipping DB insert (missing data or Supabase not ready)');
     }
 
-    return res.status(200).json({
-      ResultCode: 0,
-      ResultDesc: 'Accepted',
-    });
+    if (!messageReference || !supabase) return ack();
 
-  } catch (error) {
-    console.error('❌ Callback error:', error);
+    const isSuccess = String(resultCode) === '0';
+    const status = isSuccess ? 'SUCCESS' : 'FAILED';
 
-    return res.status(200).json({
-      ResultCode: 0,
-      ResultDesc: 'Accepted',
-    });
+    const { data: payment } = await supabase
+      .from('payments')
+      .select('id, sale_id, status')
+      .eq('message_reference', messageReference)
+      .maybeSingle();
+
+    if (!payment || payment.status === 'SUCCESS') return ack();
+
+    await supabase.from('payments').update({
+      status,
+      result_code: resultCode != null ? String(resultCode) : null,
+      result_description: resultDesc,
+      transaction_date: transactionDate ? new Date(transactionDate).toISOString() : new Date().toISOString(),
+      raw_payload: body,
+      ...(amount != null ? { amount } : {}),
+      ...(phone ? { phone_number: phone } : {}),
+      ...(receipt ? { narration: `Receipt ${receipt}` } : {}),
+      updated_at: new Date().toISOString(),
+    }).eq('id', payment.id);
+
+    if (payment.sale_id) {
+      await supabase.from('sales')
+        .update({ payment_status: isSuccess ? 'PAID' : 'FAILED' })
+        .eq('id', payment.sale_id);
+    }
+
+    return ack();
+  } catch (err) {
+    console.error('Callback error:', err);
+    return ack();
   }
 }
