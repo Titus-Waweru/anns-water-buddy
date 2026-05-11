@@ -1,152 +1,138 @@
+// Co-op Bank STK callback handler.
+// Matches by MessageReference, updates payments row, then propagates
+// payment_status to the linked sale.
+// Also defensively supports legacy Safaricom Daraja-shaped callbacks.
+
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-info, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+    "authorization, x-client-info, apikey, content-type",
 };
 
 Deno.serve(async (req) => {
-  // Handle CORS preflight
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  // Always 200 OK — bank should never retry on our errors.
+  const ok = () =>
+    new Response(JSON.stringify({ ResultCode: 0, ResultDesc: "Accepted" }), {
+      status: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
 
   try {
-    // Only accept POST requests
-    if (req.method !== "POST") {
-      return new Response(
-        JSON.stringify({ error: "Method not allowed" }),
-        { status: 405, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    if (req.method !== "POST") return ok();
+
+    const body = await req.json().catch(() => ({}));
+    console.log("Callback received:", JSON.stringify(body));
+
+    // --- Extract fields from either Co-op or Daraja shapes ---
+    let messageReference: string | null = null;
+    let resultCode: string | number | null = null;
+    let resultDesc: string | null = null;
+    let amount: number | null = null;
+    let phone: string | null = null;
+    let transactionDate: string | null = null;
+    let receipt: string | null = null;
+
+    // Co-op shape (flat or nested under Data)
+    const coop = body?.Data || body;
+    if (coop?.MessageReference) {
+      messageReference = String(coop.MessageReference);
+      resultCode = coop.ResultCode ?? coop.StatusCode ?? null;
+      resultDesc = coop.ResultDesc ?? coop.StatusDescription ?? null;
+      amount = coop.Amount != null ? Number(coop.Amount) : null;
+      phone = coop.MSISDN ? String(coop.MSISDN) : null;
+      transactionDate = coop.MessageDateTime || coop.TransactionDate || null;
+      receipt = coop.TransactionID || coop.ThirdPartyTransID || null;
     }
 
-    // Parse request body
-    const body = await req.json();
-    console.log("Received M-PESA callback:", JSON.stringify(body, null, 2));
-
-    // Extract stkCallback from body
-    const stkCallback = body?.Body?.stkCallback;
-    if (!stkCallback) {
-      console.warn("Missing stkCallback in request body");
-      // Still return 200 to acknowledge receipt
-      return new Response(JSON.stringify({ success: true }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // Extract CallbackMetadata
-    const callbackMetadata = stkCallback.CallbackMetadata;
-    if (!callbackMetadata) {
-      console.warn("Missing CallbackMetadata in stkCallback");
-      // Still return 200 to acknowledge receipt
-      return new Response(JSON.stringify({ success: true }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // Extract individual fields from CallbackMetadata.Item array
-    const metadataItems = callbackMetadata.Item || [];
-    const metadata = {};
-    
-    metadataItems.forEach((item: { Name: string; Value: unknown }) => {
-      metadata[item.Name] = item.Value;
-    });
-
-    // Extract required fields
-    const amount = metadata["Amount"];
-    const mpesaReceiptNumber = metadata["MpesaReceiptNumber"];
-    const phoneNumber = metadata["PhoneNumber"];
-    const transactionDate = metadata["TransactionDate"];
-
-    // Log extracted data
-    console.log("Extracted callback data:", {
-      amount,
-      mpesaReceiptNumber,
-      phoneNumber,
-      transactionDate,
-      resultCode: stkCallback.ResultCode,
-      resultDescription: stkCallback.ResultDesc,
-      merchantRequestId: stkCallback.MerchantRequestID,
-      checkoutRequestId: stkCallback.CheckoutRequestID,
-    });
-
-    // Initialize Supabase client with service role key
-    const supabaseUrl = Deno.env.get("SUPABASE_URL");
-    const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-
-    if (!supabaseUrl || !supabaseServiceRoleKey) {
-      console.error("Missing Supabase credentials");
-      // Return 200 anyway to avoid retries from M-PESA
-      return new Response(JSON.stringify({ success: true }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
-
-    // Save transaction to database
-    if (
-      amount !== undefined &&
-      mpesaReceiptNumber &&
-      phoneNumber &&
-      transactionDate
-    ) {
-      try {
-        const { error: insertError } = await supabase
-          .from("mpesa_transactions")
-          .insert({
-            amount: Number(amount),
-            mpesa_receipt_number: String(mpesaReceiptNumber),
-            phone_number: String(phoneNumber),
-            transaction_date: new Date(
-              String(transactionDate).match(/(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/)
-                ? String(transactionDate).replace(
-                    /(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/,
-                    "$1-$2-$3T$4:$5:$6Z"
-                  )
-                : transactionDate
-            ),
-            result_code: stkCallback.ResultCode,
-            result_description: stkCallback.ResultDesc,
-            merchant_request_id: stkCallback.MerchantRequestID,
-            checkout_request_id: stkCallback.CheckoutRequestID,
-            raw_callback_data: body,
-          });
-
-        if (insertError) {
-          console.error("Database insert error:", insertError);
-        } else {
-          console.log(
-            `Successfully saved transaction: ${mpesaReceiptNumber} for ${phoneNumber}`
-          );
-        }
-      } catch (dbError) {
-        console.error("Database operation failed:", dbError);
+    // Daraja shape fallback
+    const stk = body?.Body?.stkCallback;
+    if (!messageReference && stk) {
+      resultCode = stk.ResultCode ?? null;
+      resultDesc = stk.ResultDesc ?? null;
+      messageReference =
+        stk.MerchantRequestID || stk.CheckoutRequestID || null;
+      const items = stk.CallbackMetadata?.Item || [];
+      const get = (n: string) => items.find((i: any) => i.Name === n)?.Value;
+      amount = get("Amount") != null ? Number(get("Amount")) : null;
+      phone = get("PhoneNumber") ? String(get("PhoneNumber")) : null;
+      receipt = get("MpesaReceiptNumber") ? String(get("MpesaReceiptNumber")) : null;
+      const td = get("TransactionDate");
+      if (td) {
+        const s = String(td);
+        transactionDate = `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}T${s.slice(8, 10)}:${s.slice(10, 12)}:${s.slice(12, 14)}Z`;
       }
-    } else {
-      console.warn("Missing required callback fields for database insert:", {
-        amount,
-        mpesaReceiptNumber,
-        phoneNumber,
-        transactionDate,
-      });
     }
 
-    // Always return 200 OK immediately to acknowledge receipt
-    return new Response(JSON.stringify({ success: true }), {
-      status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  } catch (error) {
-    console.error("mpesa-callback error:", error);
-    // Return 200 anyway to prevent M-PESA retries on parse errors
-    return new Response(JSON.stringify({ success: true }), {
-      status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    if (!messageReference) {
+      console.warn("No MessageReference in callback — ignoring");
+      return ok();
+    }
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const admin = createClient(supabaseUrl, serviceKey);
+
+    const isSuccess = String(resultCode) === "0";
+    const status = isSuccess ? "SUCCESS" : "FAILED";
+
+    // Find the linked payment
+    const { data: payment, error: findErr } = await admin
+      .from("payments")
+      .select("id, sale_id, status")
+      .eq("message_reference", messageReference)
+      .maybeSingle();
+
+    if (findErr) console.error("Payment lookup error:", findErr);
+
+    if (!payment) {
+      console.warn(`No payment row for MessageReference=${messageReference}`);
+      return ok();
+    }
+
+    // Idempotency: don't downgrade a SUCCESS
+    if (payment.status === "SUCCESS") {
+      console.log("Payment already SUCCESS, ignoring duplicate callback");
+      return ok();
+    }
+
+    const { error: upErr } = await admin
+      .from("payments")
+      .update({
+        status,
+        result_code: resultCode != null ? String(resultCode) : null,
+        result_description: resultDesc,
+        transaction_date: transactionDate
+          ? new Date(transactionDate).toISOString()
+          : new Date().toISOString(),
+        raw_payload: body,
+        amount: amount ?? undefined,
+        phone_number: phone ?? undefined,
+        narration: receipt ? `Receipt ${receipt}` : undefined,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", payment.id);
+
+    if (upErr) console.error("Payment update error:", upErr);
+
+    // Propagate to sale
+    if (payment.sale_id) {
+      const { error: saleErr } = await admin
+        .from("sales")
+        .update({
+          payment_status: isSuccess ? "PAID" : "FAILED",
+        })
+        .eq("id", payment.sale_id);
+      if (saleErr) console.error("Sale update error:", saleErr);
+    }
+
+    console.log(`Callback processed: ref=${messageReference} status=${status}`);
+    return ok();
+  } catch (err) {
+    console.error("Callback fatal error:", err);
+    return ok();
   }
 });
