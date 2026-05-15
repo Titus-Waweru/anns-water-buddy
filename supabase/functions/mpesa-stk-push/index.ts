@@ -125,7 +125,7 @@ Deno.serve(async (req) => {
         transaction_currency: "KES",
         status: "PENDING",
         narration: coopPayload.Narration,
-        initiated_by: claims.claims.sub,
+        initiated_by: userData.user.id,
         raw_request: coopPayload,
       });
     }
