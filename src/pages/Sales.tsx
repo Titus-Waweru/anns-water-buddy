@@ -164,6 +164,7 @@ export default function Sales() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     if (!selectedProduct || form.quantity < 1) return;
     if (form.quantity > selectedProduct.quantity) {
       toast.error("Not enough stock available");
@@ -174,80 +175,99 @@ export default function Sales() {
       return;
     }
 
-    const saleData = {
-      customer_id: form.customerId || null,
-      customer_name: selectedCustomer?.name || "Walk-in",
-      product_id: form.productId,
-      product_name: selectedProduct.name,
-      quantity: form.quantity,
-      selling_price: selectedProduct.selling_price,
-      buying_price: selectedProduct.buying_price,
-      discount_type: form.discountType,
-      discount_value: form.discountValue,
-      total_amount: subtotal,
-      discount_amount: discountAmount,
-      final_amount: finalAmount,
-      profit,
-      payment_mode: form.paymentMode,
-      date: new Date().toISOString(),
-    };
+    setIsSubmitting(true);
+    try {
+      // Stable per-attempt idempotency key prevents duplicate inserts
+      // from accidental double-clicks or retries.
+      if (!idempotencyKeyRef.current) {
+        idempotencyKeyRef.current = `sale_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      }
+      const idempotencyKey = idempotencyKeyRef.current;
 
-    if (form.paymentMode === "Mpesa") {
-      // Insert PENDING sale directly (skip context — it deducts inventory)
-      const { data: sale, error } = await supabase
-        .from("sales")
-        .insert({
-          ...saleData,
-          branch_id: effectiveBranchId,
-          recorded_by: user?.id,
-          payment_status: "PENDING",
-        })
-        .select()
-        .single();
-      if (error || !sale) {
-        toast.error(error?.message || "Could not create sale");
+      const saleData = {
+        customer_id: form.customerId || null,
+        customer_name: selectedCustomer?.name || "Walk-in",
+        product_id: form.productId,
+        product_name: selectedProduct.name,
+        quantity: form.quantity,
+        selling_price: selectedProduct.selling_price,
+        buying_price: selectedProduct.buying_price,
+        discount_type: form.discountType,
+        discount_value: form.discountValue,
+        total_amount: subtotal,
+        discount_amount: discountAmount,
+        final_amount: finalAmount,
+        profit,
+        payment_mode: form.paymentMode,
+        date: new Date().toISOString(),
+      };
+
+      if (form.paymentMode === "Mpesa") {
+        // Insert PENDING sale directly (skip context — it deducts inventory)
+        const { data: sale, error } = await supabase
+          .from("sales")
+          .insert({
+            ...saleData,
+            branch_id: effectiveBranchId,
+            recorded_by: user?.id,
+            payment_status: "PENDING",
+            idempotency_key: idempotencyKey,
+          })
+          .select()
+          .single();
+        if (error || !sale) {
+          // 23505 = unique_violation → another tab already created this sale
+          if ((error as any)?.code === "23505") {
+            toast.info("This sale is already being processed.");
+          } else {
+            toast.error(error?.message || "Could not create sale");
+          }
+          return;
+        }
+        await sendStkPush(sale.id, mpesaPhone, finalAmount);
         return;
       }
-      await sendStkPush(sale.id, mpesaPhone, finalAmount);
-      return;
-    }
 
-    // Cash / Credit — standard path (PAID, deducts inventory in context)
-    await addSale(saleData);
+      // Cash / Credit — standard path (PAID, deducts inventory in context)
+      await addSale({ ...saleData, idempotency_key: idempotencyKey } as any);
 
-    const loyaltyPoints = Math.floor(finalAmount / 100);
-    if (form.customerId && loyaltyPoints > 0) {
-      await supabase.from("loyalty_points").insert({
-        customer_id: form.customerId,
-        points: loyaltyPoints,
-        description: `Sale: ${selectedProduct.name} × ${form.quantity}`,
+      const loyaltyPoints = Math.floor(finalAmount / 100);
+      if (form.customerId && loyaltyPoints > 0) {
+        await supabase.from("loyalty_points").insert({
+          customer_id: form.customerId,
+          points: loyaltyPoints,
+          description: `Sale: ${selectedProduct.name} × ${form.quantity}`,
+        });
+        const newTotal = (selectedCustomer?.loyalty_points || 0) + loyaltyPoints;
+        await supabase.from("customers").update({ loyalty_points: newTotal }).eq("id", form.customerId);
+      }
+
+      const totalLoyalty = (selectedCustomer?.loyalty_points || 0) + loyaltyPoints;
+      setReceiptData({
+        id: crypto.randomUUID(),
+        customerName: selectedCustomer?.name || "Walk-in",
+        productName: selectedProduct.name,
+        quantity: form.quantity,
+        sellingPrice: selectedProduct.selling_price,
+        totalAmount: subtotal,
+        discountAmount,
+        finalAmount,
+        paymentMode: form.paymentMode,
+        profit,
+        loyaltyPoints,
+        totalLoyaltyPoints: totalLoyalty,
+        rewardMessage: totalLoyalty >= 100 ? "🎉 Eligible for loyalty reward!" : null,
+        date: new Date().toISOString(),
       });
-      const newTotal = (selectedCustomer?.loyalty_points || 0) + loyaltyPoints;
-      await supabase.from("customers").update({ loyalty_points: newTotal }).eq("id", form.customerId);
+
+      toast.success("Sale recorded successfully!");
+      idempotencyKeyRef.current = null;
+      setForm({ customerId: "", productId: "", quantity: 1, discountType: "fixed", discountValue: 0, paymentMode: "Cash" });
+      setMpesaPhone("");
+      setOpen(false);
+    } finally {
+      setIsSubmitting(false);
     }
-
-    const totalLoyalty = (selectedCustomer?.loyalty_points || 0) + loyaltyPoints;
-    setReceiptData({
-      id: crypto.randomUUID(),
-      customerName: selectedCustomer?.name || "Walk-in",
-      productName: selectedProduct.name,
-      quantity: form.quantity,
-      sellingPrice: selectedProduct.selling_price,
-      totalAmount: subtotal,
-      discountAmount,
-      finalAmount,
-      paymentMode: form.paymentMode,
-      profit,
-      loyaltyPoints,
-      totalLoyaltyPoints: totalLoyalty,
-      rewardMessage: totalLoyalty >= 100 ? "🎉 Eligible for loyalty reward!" : null,
-      date: new Date().toISOString(),
-    });
-
-    toast.success("Sale recorded successfully!");
-    setForm({ customerId: "", productId: "", quantity: 1, discountType: "fixed", discountValue: 0, paymentMode: "Cash" });
-    setMpesaPhone("");
-    setOpen(false);
   };
 
   const closeDialog = () => {
