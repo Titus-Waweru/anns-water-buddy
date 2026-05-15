@@ -163,7 +163,15 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
   const addProduct = useCallback(async (p: Database["public"]["Tables"]["products"]["Insert"]) => {
     const { error } = await supabase.from("products").insert({ ...p, branch_id: p.branch_id || effectiveBranchId });
-    if (!error) fetchAll();
+    if (error) {
+      if ((error as any).code === "23505") {
+        toast.error(`A product named "${p.name}" already exists in this branch.`);
+      } else {
+        toast.error(error.message);
+      }
+      throw error;
+    }
+    fetchAll();
   }, [fetchAll, effectiveBranchId]);
 
   const updateProduct = useCallback(async (p: Database["public"]["Tables"]["products"]["Update"] & { id: string }) => {

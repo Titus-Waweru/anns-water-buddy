@@ -605,6 +605,7 @@ export type Database = {
           discount_value: number
           final_amount: number
           id: string
+          idempotency_key: string | null
           payment_mode: Database["public"]["Enums"]["payment_mode"]
           payment_status: string
           product_id: string
@@ -627,6 +628,7 @@ export type Database = {
           discount_value?: number
           final_amount: number
           id?: string
+          idempotency_key?: string | null
           payment_mode?: Database["public"]["Enums"]["payment_mode"]
           payment_status?: string
           product_id: string
@@ -649,6 +651,7 @@ export type Database = {
           discount_value?: number
           final_amount?: number
           id?: string
+          idempotency_key?: string | null
           payment_mode?: Database["public"]["Enums"]["payment_mode"]
           payment_status?: string
           product_id?: string
