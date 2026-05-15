@@ -25,6 +25,8 @@ export default function Sales() {
   const [mpesaPhone, setMpesaPhone] = useState("");
   const [stkPending, setStkPending] = useState<{ saleId: string; messageRef: string } | null>(null);
   const [stkStatus, setStkStatus] = useState<"idle" | "sending" | "waiting" | "failed">("idle");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const idempotencyKeyRef = useRef<string | null>(null);
   const pollRef = useRef<number | null>(null);
   const [form, setForm] = useState({
     customerId: "",
