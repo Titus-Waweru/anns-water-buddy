@@ -278,6 +278,7 @@ export default function Sales() {
     setOpen(false);
     setStkPending(null);
     setStkStatus("idle");
+    idempotencyKeyRef.current = null;
     setForm({ customerId: "", productId: "", quantity: 1, discountType: "fixed", discountValue: 0, paymentMode: "Cash" });
     setMpesaPhone("");
   };
