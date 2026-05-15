@@ -413,7 +413,8 @@ export default function Sales() {
                 </Card>
               )}
 
-              <Button type="submit" className="w-full" disabled={!form.productId || stkStatus === "sending"}>
+              <Button type="submit" className="w-full gap-2" disabled={!form.productId || isSubmitting || stkStatus === "sending"}>
+                {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
                 {form.paymentMode === "Mpesa" ? "Send STK Push" : "Record Sale"}
               </Button>
             </form>
