@@ -260,32 +260,27 @@ Deno.serve(async (req) => {
       });
     }
 
-    // LIVE MODE — Co-op Bank OpenAPI. Credentials are REQUIRED. No stub fallback.
-    const baseUrl = Deno.env.get("COOP_BASE_URL") || "https://openapi.co-opbank.co.ke";
-    const stkPath = Deno.env.get("COOP_STK_PATH") || "/FT/stk/1.0.0";
-    const consumerKey = Deno.env.get("COOP_CONSUMER_KEY");
-    const consumerSecret = Deno.env.get("COOP_CONSUMER_SECRET");
-
-    if (!consumerKey || !consumerSecret) {
+    // LIVE MODE — Co-op Bank OpenAPI driven entirely by COOP_CONFIG_JSON.
+    let cfg: CoopConfig;
+    try {
+      cfg = parseCoopConfig();
+    } catch (e) {
       await admin
         .from("payments")
         .update({
           status: "FAILED",
-          result_description: "Co-op credentials not configured on server.",
+          result_description: (e as Error).message,
         })
         .eq("message_reference", messageReference);
       return new Response(
-        JSON.stringify({
-          error:
-            "Payment gateway not configured. Set COOP_CONSUMER_KEY and COOP_CONSUMER_SECRET.",
-        }),
+        JSON.stringify({ error: (e as Error).message }),
         { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
     try {
-      const token = await getCoopToken(baseUrl, consumerKey, consumerSecret);
-      const stkRes = await fetch(`${baseUrl}${stkPath}`, {
+      const token = await getCoopTokenFromCfg(cfg);
+      const stkRes = await fetch(cfg.stkUrl, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -301,8 +296,8 @@ Deno.serve(async (req) => {
       let finalData = stkData;
       if (stkRes.status === 401) {
         cachedToken = null;
-        const fresh = await getCoopToken(baseUrl, consumerKey, consumerSecret);
-        finalRes = await fetch(`${baseUrl}${stkPath}`, {
+        const fresh = await getCoopTokenFromCfg(cfg);
+        finalRes = await fetch(cfg.stkUrl, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${fresh}`,
