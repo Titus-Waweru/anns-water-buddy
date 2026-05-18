@@ -38,6 +38,127 @@ async function getCoopToken(baseUrl: string, key: string, secret: string) {
   return data.access_token as string;
 }
 
+// --------- Co-op Postman-collection config parser ---------
+// Single source of truth: COOP_CONFIG_JSON env var holds the raw Postman
+// collection JSON provided by Co-op Bank. We parse it once per cold start.
+type CoopConfig = {
+  tokenUrl: string;
+  stkUrl: string;
+  consumerKey: string;
+  consumerSecret: string;
+};
+let cachedConfig: CoopConfig | null = null;
+
+function pickBasicAuth(node: any): { user?: string; pass?: string } {
+  const basic = node?.auth?.basic;
+  if (!basic) return {};
+  // Postman v2.1: array of {key,value,type}. Older: object.
+  if (Array.isArray(basic)) {
+    const get = (k: string) =>
+      basic.find((b: any) => b?.key === k)?.value;
+    return { user: get("username"), pass: get("password") };
+  }
+  return { user: basic.username, pass: basic.password };
+}
+
+function urlToString(u: any): string {
+  if (!u) return "";
+  if (typeof u === "string") return u;
+  if (typeof u.raw === "string") return u.raw;
+  if (Array.isArray(u.host)) {
+    const host = u.host.join(".");
+    const path = Array.isArray(u.path) ? "/" + u.path.join("/") : "";
+    const proto = u.protocol ? `${u.protocol}://` : "https://";
+    return `${proto}${host}${path}`;
+  }
+  return "";
+}
+
+function walkItems(items: any[], cb: (it: any) => void) {
+  for (const it of items || []) {
+    if (Array.isArray(it.item)) walkItems(it.item, cb);
+    if (it.request) cb(it);
+  }
+}
+
+function parseCoopConfig(): CoopConfig {
+  if (cachedConfig) return cachedConfig;
+  const raw = Deno.env.get("COOP_CONFIG_JSON");
+  if (!raw) {
+    throw new Error(
+      "COOP_CONFIG_JSON not configured. Paste the Co-op Bank Postman collection JSON into this secret.",
+    );
+  }
+  let parsed: any;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    throw new Error(`COOP_CONFIG_JSON is not valid JSON: ${(e as Error).message}`);
+  }
+
+  // Collection-level basic auth (most common)
+  let { user, pass } = pickBasicAuth(parsed);
+
+  let tokenUrl = "";
+  let stkUrl = "";
+
+  walkItems(parsed.item || [], (it) => {
+    const name = String(it.name || "").toLowerCase();
+    const url = urlToString(it.request?.url);
+    if (!url) return;
+    const lower = url.toLowerCase();
+    if (!tokenUrl && (name.includes("token") || lower.endsWith("/token") || lower.includes("/token?"))) {
+      tokenUrl = url.split("?")[0];
+    }
+    if (!stkUrl && (name.includes("stk") || lower.includes("/stk/"))) {
+      stkUrl = url;
+    }
+    // Per-request basic auth fallback
+    if ((!user || !pass) && it.request?.auth) {
+      const a = pickBasicAuth(it.request);
+      user = user || a.user;
+      pass = pass || a.pass;
+    }
+  });
+
+  // Hard-coded production defaults if collection omits the URLs
+  tokenUrl = tokenUrl || "https://openapi.co-opbank.co.ke/token";
+  stkUrl = stkUrl || "https://openapi.co-opbank.co.ke/FT/stk/1.0.0";
+
+  if (!user || !pass) {
+    throw new Error(
+      "COOP_CONFIG_JSON is missing Basic Auth (username/password). Ensure the collection includes auth.basic credentials.",
+    );
+  }
+
+  cachedConfig = {
+    tokenUrl,
+    stkUrl,
+    consumerKey: user,
+    consumerSecret: pass,
+  };
+  return cachedConfig;
+}
+
+async function getCoopTokenFromCfg(cfg: CoopConfig) {
+  const now = Date.now();
+  if (cachedToken && cachedToken.expiresAt > now + 30_000) {
+    return cachedToken.token;
+  }
+  const creds = btoa(`${cfg.consumerKey}:${cfg.consumerSecret}`);
+  const url = cfg.tokenUrl.includes("grant_type=")
+    ? cfg.tokenUrl
+    : `${cfg.tokenUrl}?grant_type=client_credentials`;
+  const res = await fetch(url, { headers: { Authorization: `Basic ${creds}` } });
+  const data = await res.json();
+  if (!res.ok || !data.access_token) {
+    throw new Error(`Token failed: ${JSON.stringify(data)}`);
+  }
+  const ttlMs = (Number(data.expires_in) || 3600) * 1000;
+  cachedToken = { token: data.access_token, expiresAt: now + ttlMs };
+  return data.access_token as string;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
