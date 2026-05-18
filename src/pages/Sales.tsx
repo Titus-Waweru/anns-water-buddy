@@ -146,15 +146,14 @@ export default function Sales() {
     const { data, error } = await supabase.functions.invoke("mpesa-stk-push", {
       body: { sale_id: saleId, amount, phone, narration: `Sale ${saleId.slice(0, 8)}` },
     });
-    if (error || (data?.error && !data?.message_reference)) {
+    if (error || data?.error || !data?.message_reference) {
       setStkStatus("failed");
       toast.error(error?.message || data?.error || "STK push failed");
       return;
     }
-    if (data?.warning) toast.info(data.warning);
     setStkPending({ saleId, messageRef: data.message_reference });
     setStkStatus("waiting");
-    toast.success("STK push sent. Check your phone.");
+    toast.success("STK push sent. Waiting for payment confirmation…");
   };
 
   const retryStk = async () => {
