@@ -139,28 +139,32 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Trigger Co-op STK
-    const baseUrl = Deno.env.get("COOP_BASE_URL");
+    // LIVE MODE — Co-op Bank OpenAPI. Credentials are REQUIRED. No stub fallback.
+    const baseUrl = Deno.env.get("COOP_BASE_URL") || "https://openapi.co-opbank.co.ke";
+    const stkPath = Deno.env.get("COOP_STK_PATH") || "/FT/stk/1.0.0";
     const consumerKey = Deno.env.get("COOP_CONSUMER_KEY");
     const consumerSecret = Deno.env.get("COOP_CONSUMER_SECRET");
 
-    if (!baseUrl || !consumerKey || !consumerSecret) {
-      // Credentials not yet configured — payment row is still created so
-      // the callback flow can be tested independently.
+    if (!consumerKey || !consumerSecret) {
+      await admin
+        .from("payments")
+        .update({
+          status: "FAILED",
+          result_description: "Co-op credentials not configured on server.",
+        })
+        .eq("message_reference", messageReference);
       return new Response(
         JSON.stringify({
-          ok: true,
-          pending: true,
-          message_reference: messageReference,
-          warning: "Co-op credentials not configured. STK push not sent.",
+          error:
+            "Payment gateway not configured. Set COOP_CONSUMER_KEY and COOP_CONSUMER_SECRET.",
         }),
-        { status: 202, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
     try {
       const token = await getCoopToken(baseUrl, consumerKey, consumerSecret);
-      const stkRes = await fetch(`${baseUrl}/stk/push`, {
+      const stkRes = await fetch(`${baseUrl}${stkPath}`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -168,27 +172,44 @@ Deno.serve(async (req) => {
         },
         body: JSON.stringify(coopPayload),
       });
-      const stkData = await stkRes.json();
-      console.log("Co-op STK response:", stkData);
+      const stkData = await stkRes.json().catch(() => ({}));
+      console.log("Co-op STK response:", stkRes.status, JSON.stringify(stkData));
 
-      if (!stkRes.ok) {
+      // If unauthorized, force-refresh token once and retry
+      let finalRes = stkRes;
+      let finalData = stkData;
+      if (stkRes.status === 401) {
+        cachedToken = null;
+        const fresh = await getCoopToken(baseUrl, consumerKey, consumerSecret);
+        finalRes = await fetch(`${baseUrl}${stkPath}`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${fresh}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(coopPayload),
+        });
+        finalData = await finalRes.json().catch(() => ({}));
+      }
+
+      if (!finalRes.ok) {
         await admin
           .from("payments")
           .update({
             status: "FAILED",
-            result_description: stkData?.ResultDesc || "STK push request failed",
-            raw_payload: stkData,
+            result_description: finalData?.ResultDesc || finalData?.message || "STK push request failed",
+            raw_payload: finalData,
           })
           .eq("message_reference", messageReference);
 
         return new Response(
-          JSON.stringify({ error: "STK push failed", details: stkData }),
+          JSON.stringify({ error: "STK push failed", details: finalData }),
           { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
       }
 
       return new Response(
-        JSON.stringify({ ok: true, message_reference: messageReference, response: stkData }),
+        JSON.stringify({ ok: true, message_reference: messageReference, response: finalData }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     } catch (err) {
