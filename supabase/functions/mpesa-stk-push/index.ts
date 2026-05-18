@@ -20,24 +20,6 @@ function normalizePhone(p: string): string {
 // Simple in-memory token cache (per edge-runtime instance)
 let cachedToken: { token: string; expiresAt: number } | null = null;
 
-async function getCoopToken(baseUrl: string, key: string, secret: string) {
-  const now = Date.now();
-  if (cachedToken && cachedToken.expiresAt > now + 30_000) {
-    return cachedToken.token;
-  }
-  const creds = btoa(`${key}:${secret}`);
-  const res = await fetch(`${baseUrl}/token?grant_type=client_credentials`, {
-    headers: { Authorization: `Basic ${creds}` },
-  });
-  const data = await res.json();
-  if (!res.ok || !data.access_token) {
-    throw new Error(`Token failed: ${JSON.stringify(data)}`);
-  }
-  const ttlMs = (Number(data.expires_in) || 3600) * 1000;
-  cachedToken = { token: data.access_token, expiresAt: now + ttlMs };
-  return data.access_token as string;
-}
-
 // --------- Co-op Postman-collection config parser ---------
 // Single source of truth: COOP_CONFIG_JSON env var holds the raw Postman
 // collection JSON provided by Co-op Bank. We parse it once per cold start.
