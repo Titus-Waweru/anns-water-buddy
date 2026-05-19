@@ -367,6 +367,8 @@ Deno.serve(async (req) => {
           headers: {
             Authorization: `Bearer ${fresh}`,
             "Content-Type": "application/json",
+            Accept: "application/json",
+            "User-Agent": "WonderAquaPOS/1.0 (+https://wonderaqua.co.ke)",
           },
           body: JSON.stringify(coopPayload),
         });
