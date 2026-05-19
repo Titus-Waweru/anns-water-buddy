@@ -143,17 +143,42 @@ export default function Sales() {
 
   const sendStkPush = async (saleId: string, phone: string, amount: number) => {
     setStkStatus("sending");
-    const { data, error } = await supabase.functions.invoke("mpesa-stk-push", {
-      body: { sale_id: saleId, amount, phone, narration: `Sale ${saleId.slice(0, 8)}` },
-    });
-    if (error || data?.error || !data?.message_reference) {
+    try {
+      const { data, error } = await supabase.functions.invoke("mpesa-stk-push", {
+        body: { sale_id: saleId, amount, phone, narration: `Sale ${saleId.slice(0, 8)}` },
+      });
+
+      // Graceful upstream-blocked path: backend returns 200 + fallback:true.
+      if (!error && data?.fallback) {
+        setStkStatus("failed");
+        toast.error(
+          data.message || "Payment provider authorization pending. Please retry later.",
+          { description: data.correlation_id ? `Ref: ${data.correlation_id}` : undefined },
+        );
+        // Keep the sale + payment as PENDING so the cashier can retry.
+        if (data.message_reference) {
+          setStkPending({ saleId, messageRef: data.message_reference });
+        }
+        return;
+      }
+
+      if (error || data?.ok === false || !data?.message_reference) {
+        setStkStatus("failed");
+        toast.error(
+          data?.message || data?.error || error?.message || "STK push failed. Please retry.",
+        );
+        return;
+      }
+
+      setStkPending({ saleId, messageRef: data.message_reference });
+      setStkStatus("waiting");
+      toast.success("STK push sent. Waiting for payment confirmation…");
+    } catch (e: any) {
+      // Never let an exception blank-screen the POS.
+      console.error("sendStkPush error:", e);
       setStkStatus("failed");
-      toast.error(error?.message || data?.error || "STK push failed");
-      return;
+      toast.error("Payment provider unreachable. Please retry later.");
     }
-    setStkPending({ saleId, messageRef: data.message_reference });
-    setStkStatus("waiting");
-    toast.success("STK push sent. Waiting for payment confirmation…");
   };
 
   const retryStk = async () => {
