@@ -199,7 +199,12 @@ async function getCoopTokenFromCfg(cfg: CoopConfig) {
     ? cfg.tokenUrl
     : `${cfg.tokenUrl}?grant_type=client_credentials`;
   const res = await fetch(url, {
-    headers: { Authorization: `Basic ${creds}`, Accept: "application/json" },
+    headers: {
+      Authorization: `Basic ${creds}`,
+      Accept: "application/json",
+      "User-Agent": "WonderAquaPOS/1.0 (+https://wonderaqua.co.ke)",
+      "Cache-Control": "no-cache",
+    },
   });
   const bodyText = await res.text();
   let data: any = {};
