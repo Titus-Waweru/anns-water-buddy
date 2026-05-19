@@ -259,6 +259,14 @@ async function getCoopTokenFromCfg(cfg: CoopConfig, correlationId: string) {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
+  const correlationId =
+    req.headers.get("x-correlation-id") || crypto.randomUUID();
+  const respHeaders = {
+    ...corsHeaders,
+    "Content-Type": "application/json",
+    "X-Correlation-Id": correlationId,
+  };
+
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
