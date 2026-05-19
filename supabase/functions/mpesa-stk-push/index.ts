@@ -63,6 +63,50 @@ function walkItems(items: any[], cb: (it: any) => void) {
   }
 }
 
+// Pull values from a Postman `variable` / `variables` array or object.
+function readVars(node: any): Record<string, string> {
+  const out: Record<string, string> = {};
+  const v = node?.variable ?? node?.variables;
+  if (Array.isArray(v)) {
+    for (const item of v) {
+      if (item?.key) out[String(item.key).toLowerCase()] = String(item.value ?? "");
+    }
+  } else if (v && typeof v === "object") {
+    for (const [k, val] of Object.entries(v)) {
+      out[k.toLowerCase()] = typeof val === "string" ? val
+        : (val as any)?.value ?? "";
+    }
+  }
+  return out;
+}
+
+function pickCredsFromVars(vars: Record<string, string>): { user?: string; pass?: string } {
+  const userKeys = ["consumer_key", "consumerkey", "client_id", "clientid", "username", "api_key", "apikey", "user"];
+  const passKeys = ["consumer_secret", "consumersecret", "client_secret", "clientsecret", "password", "api_secret", "apisecret", "secret", "pass"];
+  let user: string | undefined;
+  let pass: string | undefined;
+  for (const k of userKeys) if (!user && vars[k]) user = vars[k];
+  for (const k of passKeys) if (!pass && vars[k]) pass = vars[k];
+  return { user, pass };
+}
+
+// Decode an "Authorization: Basic xxx" header value if present on a request.
+function pickCredsFromAuthHeader(headers: any[]): { user?: string; pass?: string } {
+  if (!Array.isArray(headers)) return {};
+  for (const h of headers) {
+    if (String(h?.key || "").toLowerCase() !== "authorization") continue;
+    const val = String(h?.value || "");
+    const m = val.match(/Basic\s+([A-Za-z0-9+/=]+)/i);
+    if (!m) continue;
+    try {
+      const decoded = atob(m[1]);
+      const idx = decoded.indexOf(":");
+      if (idx > 0) return { user: decoded.slice(0, idx), pass: decoded.slice(idx + 1) };
+    } catch { /* ignore */ }
+  }
+  return {};
+}
+
 function parseCoopConfig(): CoopConfig {
   if (cachedConfig) return cachedConfig;
   const raw = Deno.env.get("COOP_CONFIG_JSON");
@@ -78,8 +122,16 @@ function parseCoopConfig(): CoopConfig {
     throw new Error(`COOP_CONFIG_JSON is not valid JSON: ${(e as Error).message}`);
   }
 
-  // Collection-level basic auth (most common)
+  // 1) Collection-level basic auth
   let { user, pass } = pickBasicAuth(parsed);
+
+  // 2) Collection-level variables (consumer_key / consumer_secret etc.)
+  const collectionVars = readVars(parsed);
+  if (!user || !pass) {
+    const v = pickCredsFromVars(collectionVars);
+    user = user || v.user;
+    pass = pass || v.pass;
+  }
 
   let tokenUrl = "";
   let stkUrl = "";
@@ -87,21 +139,34 @@ function parseCoopConfig(): CoopConfig {
   walkItems(parsed.item || [], (it) => {
     const name = String(it.name || "").toLowerCase();
     const url = urlToString(it.request?.url);
-    if (!url) return;
     const lower = url.toLowerCase();
-    if (!tokenUrl && (name.includes("token") || lower.endsWith("/token") || lower.includes("/token?"))) {
-      tokenUrl = url.split("?")[0];
+    if (url) {
+      if (!tokenUrl && (name.includes("token") || lower.endsWith("/token") || lower.includes("/token?"))) {
+        tokenUrl = url.split("?")[0];
+      }
+      if (!stkUrl && (name.includes("stk") || lower.includes("/stk/"))) {
+        stkUrl = url;
+      }
     }
-    if (!stkUrl && (name.includes("stk") || lower.includes("/stk/"))) {
-      stkUrl = url;
-    }
-    // Per-request basic auth fallback
+    // 3) Per-request basic auth fallback
     if ((!user || !pass) && it.request?.auth) {
       const a = pickBasicAuth(it.request);
       user = user || a.user;
       pass = pass || a.pass;
     }
+    // 4) Per-request Authorization header fallback (Basic <base64>)
+    if (!user || !pass) {
+      const a = pickCredsFromAuthHeader(it.request?.header);
+      user = user || a.user;
+      pass = pass || a.pass;
+    }
   });
+
+  // 5) Resolve {{var}} placeholders in URLs against collection vars
+  const resolveVars = (s: string) =>
+    s.replace(/\{\{(\w+)\}\}/g, (_, k) => collectionVars[String(k).toLowerCase()] ?? "");
+  tokenUrl = resolveVars(tokenUrl);
+  stkUrl = resolveVars(stkUrl);
 
   // Hard-coded production defaults if collection omits the URLs
   tokenUrl = tokenUrl || "https://openapi.co-opbank.co.ke/token";
@@ -109,7 +174,9 @@ function parseCoopConfig(): CoopConfig {
 
   if (!user || !pass) {
     throw new Error(
-      "COOP_CONFIG_JSON is missing Basic Auth (username/password). Ensure the collection includes auth.basic credentials.",
+      "COOP_CONFIG_JSON has no credentials. Expected one of: auth.basic{username,password}, " +
+      "collection variables (consumer_key/consumer_secret, client_id/client_secret, username/password), " +
+      "or an Authorization: Basic <base64> header on the token request.",
     );
   }
 
