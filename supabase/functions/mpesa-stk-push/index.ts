@@ -370,21 +370,70 @@ Deno.serve(async (req) => {
     try {
       cfg = parseCoopConfig();
     } catch (e) {
-      await admin
-        .from("payments")
-        .update({
-          status: "FAILED",
-          result_description: (e as Error).message,
-        })
-        .eq("message_reference", messageReference);
+      console.error(JSON.stringify({
+        evt: "coop_config_error",
+        correlationId,
+        message: (e as Error).message,
+      }));
+      // Leave payment PENDING so it can be retried once secrets are fixed.
       return new Response(
-        JSON.stringify({ error: (e as Error).message }),
-        { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        JSON.stringify({
+          ok: false,
+          fallback: true,
+          error_code: "CONFIG_MISSING",
+          message: "Payment gateway is being configured. Please retry later.",
+          correlation_id: correlationId,
+          message_reference: messageReference,
+        }),
+        { status: 200, headers: respHeaders },
       );
     }
 
+    // Helper: build the graceful upstream-failure response (HTTP 200, fallback:true)
+    const upstreamFallback = async (
+      errorCode: string,
+      upstreamStatus: number,
+      upstreamUrl: string,
+      bodySnippet: string,
+    ) => {
+      console.error(JSON.stringify({
+        evt: "coop_upstream_blocked",
+        correlationId,
+        sale_id,
+        message_reference: messageReference,
+        error_code: errorCode,
+        upstream_status: upstreamStatus,
+        upstream_url: upstreamUrl,
+        upstream_body: bodySnippet,
+      }));
+      // Keep payment PENDING — the bank never accepted it, so the cashier can retry.
+      await admin
+        .from("payments")
+        .update({
+          status: "PENDING",
+          result_code: String(upstreamStatus),
+          result_description:
+            `Upstream ${errorCode} (${upstreamStatus}) — ${bodySnippet.slice(0, 180)}`,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("message_reference", messageReference);
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          fallback: true,
+          error_code: errorCode,
+          message: "Payment provider authorization pending. Please retry later.",
+          correlation_id: correlationId,
+          message_reference: messageReference,
+        }),
+        { status: 200, headers: respHeaders },
+      );
+    };
+
     try {
-      const token = await getCoopTokenFromCfg(cfg);
+      const token = await getCoopTokenFromCfg(cfg, correlationId);
+
+      const t0 = Date.now();
       const stkRes = await fetch(cfg.stkUrl, {
         method: "POST",
         headers: {
@@ -392,18 +441,32 @@ Deno.serve(async (req) => {
           "Content-Type": "application/json",
           Accept: "application/json",
           "User-Agent": "WonderAquaPOS/1.0 (+https://wonderaqua.co.ke)",
+          "X-Correlation-Id": correlationId,
         },
         body: JSON.stringify(coopPayload),
       });
-      const stkData = await stkRes.json().catch(() => ({}));
-      console.log("Co-op STK response:", stkRes.status, JSON.stringify(stkData));
+      const stkText = await stkRes.text();
+      let stkData: any = {};
+      try { stkData = JSON.parse(stkText); } catch { /* HTML/error page */ }
 
-      // If unauthorized, force-refresh token once and retry
+      console.log(JSON.stringify({
+        evt: "coop_stk",
+        correlationId,
+        sale_id,
+        message_reference: messageReference,
+        url: cfg.stkUrl,
+        status: stkRes.status,
+        duration_ms: Date.now() - t0,
+        response: stkData?.MessageReference ? stkData : stkText.slice(0, 500),
+      }));
+
+      // Refresh token + retry once on 401
       let finalRes = stkRes;
       let finalData = stkData;
+      let finalText = stkText;
       if (stkRes.status === 401) {
         cachedToken = null;
-        const fresh = await getCoopTokenFromCfg(cfg);
+        const fresh = await getCoopTokenFromCfg(cfg, correlationId);
         finalRes = await fetch(cfg.stkUrl, {
           method: "POST",
           headers: {
@@ -411,51 +474,100 @@ Deno.serve(async (req) => {
             "Content-Type": "application/json",
             Accept: "application/json",
             "User-Agent": "WonderAquaPOS/1.0 (+https://wonderaqua.co.ke)",
+            "X-Correlation-Id": correlationId,
           },
           body: JSON.stringify(coopPayload),
         });
-        finalData = await finalRes.json().catch(() => ({}));
+        finalText = await finalRes.text();
+        try { finalData = JSON.parse(finalText); } catch { finalData = {}; }
       }
 
       if (!finalRes.ok) {
+        // Treat WAF/auth blocks as retryable upstream failures, not hard FAILED.
+        const isWafBlock =
+          finalRes.status === 401 || finalRes.status === 403 ||
+          finalRes.status === 503 || finalText.trimStart().startsWith("<");
+        if (isWafBlock) {
+          return upstreamFallback(
+            finalRes.status === 403 ? "UPSTREAM_FORBIDDEN" : "UPSTREAM_UNAVAILABLE",
+            finalRes.status,
+            cfg.stkUrl,
+            finalText.slice(0, 500).replace(/\s+/g, " ").trim(),
+          );
+        }
         await admin
           .from("payments")
           .update({
             status: "FAILED",
-            result_description: finalData?.ResultDesc || finalData?.message || "STK push request failed",
+            result_description:
+              finalData?.ResultDesc || finalData?.message || "STK push request failed",
             raw_payload: finalData,
           })
           .eq("message_reference", messageReference);
-
         return new Response(
-          JSON.stringify({ error: "STK push failed", details: finalData }),
-          { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          JSON.stringify({
+            ok: false,
+            error_code: "STK_FAILED",
+            message: finalData?.ResultDesc || "STK push failed",
+            details: finalData,
+            correlation_id: correlationId,
+          }),
+          { status: 200, headers: respHeaders },
         );
       }
 
       return new Response(
-        JSON.stringify({ ok: true, message_reference: messageReference, response: finalData }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        JSON.stringify({
+          ok: true,
+          message_reference: messageReference,
+          response: finalData,
+          correlation_id: correlationId,
+        }),
+        { status: 200, headers: respHeaders },
       );
     } catch (err) {
-      console.error("STK error:", err);
-      await admin
-        .from("payments")
-        .update({
-          status: "FAILED",
-          result_description: String((err as Error).message),
-        })
-        .eq("message_reference", messageReference);
+      if (err instanceof UpstreamError) {
+        return upstreamFallback(
+          err.status === 403 ? "UPSTREAM_FORBIDDEN" : "UPSTREAM_UNAVAILABLE",
+          err.status,
+          err.url,
+          err.bodySnippet,
+        );
+      }
+      console.error(JSON.stringify({
+        evt: "stk_unhandled_error",
+        correlationId,
+        message: String((err as Error).message),
+        stack: (err as Error).stack,
+      }));
+      // Leave payment PENDING for retry — don't poison the row.
       return new Response(
-        JSON.stringify({ error: String((err as Error).message) }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        JSON.stringify({
+          ok: false,
+          fallback: true,
+          error_code: "UNEXPECTED_ERROR",
+          message: "Payment provider unreachable. Please retry later.",
+          correlation_id: correlationId,
+          message_reference: messageReference,
+        }),
+        { status: 200, headers: respHeaders },
       );
     }
   } catch (e) {
-    console.error("mpesa-stk-push error:", e);
-    return new Response(JSON.stringify({ error: String((e as Error).message) }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    console.error(JSON.stringify({
+      evt: "mpesa_stk_push_error",
+      correlationId,
+      message: String((e as Error).message),
+      stack: (e as Error).stack,
+    }));
+    return new Response(
+      JSON.stringify({
+        ok: false,
+        error_code: "INTERNAL_ERROR",
+        message: "Internal error. Please retry.",
+        correlation_id: correlationId,
+      }),
+      { status: 200, headers: respHeaders },
+    );
   }
 });
