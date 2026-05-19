@@ -199,7 +199,12 @@ async function getCoopTokenFromCfg(cfg: CoopConfig) {
     ? cfg.tokenUrl
     : `${cfg.tokenUrl}?grant_type=client_credentials`;
   const res = await fetch(url, {
-    headers: { Authorization: `Basic ${creds}`, Accept: "application/json" },
+    headers: {
+      Authorization: `Basic ${creds}`,
+      Accept: "application/json",
+      "User-Agent": "WonderAquaPOS/1.0 (+https://wonderaqua.co.ke)",
+      "Cache-Control": "no-cache",
+    },
   });
   const bodyText = await res.text();
   let data: any = {};
@@ -343,6 +348,8 @@ Deno.serve(async (req) => {
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
+          Accept: "application/json",
+          "User-Agent": "WonderAquaPOS/1.0 (+https://wonderaqua.co.ke)",
         },
         body: JSON.stringify(coopPayload),
       });
@@ -360,6 +367,8 @@ Deno.serve(async (req) => {
           headers: {
             Authorization: `Bearer ${fresh}`,
             "Content-Type": "application/json",
+            Accept: "application/json",
+            "User-Agent": "WonderAquaPOS/1.0 (+https://wonderaqua.co.ke)",
           },
           body: JSON.stringify(coopPayload),
         });
