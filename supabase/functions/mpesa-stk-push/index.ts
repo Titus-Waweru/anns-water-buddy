@@ -189,7 +189,22 @@ function parseCoopConfig(): CoopConfig {
   return cachedConfig;
 }
 
-async function getCoopTokenFromCfg(cfg: CoopConfig) {
+// Typed upstream error so the handler can decide HTTP status + UX message.
+class UpstreamError extends Error {
+  status: number;
+  url: string;
+  bodySnippet: string;
+  isHtml: boolean;
+  constructor(status: number, url: string, bodyText: string) {
+    super(`Upstream ${status} from ${url}`);
+    this.status = status;
+    this.url = url;
+    this.bodySnippet = bodyText.slice(0, 500).replace(/\s+/g, " ").trim();
+    this.isHtml = bodyText.trimStart().startsWith("<");
+  }
+}
+
+async function getCoopTokenFromCfg(cfg: CoopConfig, correlationId: string) {
   const now = Date.now();
   if (cachedToken && cachedToken.expiresAt > now + 30_000) {
     return cachedToken.token;
@@ -198,24 +213,43 @@ async function getCoopTokenFromCfg(cfg: CoopConfig) {
   const url = cfg.tokenUrl.includes("grant_type=")
     ? cfg.tokenUrl
     : `${cfg.tokenUrl}?grant_type=client_credentials`;
+  const t0 = Date.now();
   const res = await fetch(url, {
     headers: {
       Authorization: `Basic ${creds}`,
       Accept: "application/json",
       "User-Agent": "WonderAquaPOS/1.0 (+https://wonderaqua.co.ke)",
       "Cache-Control": "no-cache",
+      "X-Correlation-Id": correlationId,
     },
   });
   const bodyText = await res.text();
+  const ms = Date.now() - t0;
+  console.log(JSON.stringify({
+    evt: "coop_token",
+    correlationId,
+    url,
+    status: res.status,
+    duration_ms: ms,
+    upstream_headers: {
+      "x-akamai-request-id": res.headers.get("x-akamai-request-id"),
+      "x-cache": res.headers.get("x-cache"),
+      "server": res.headers.get("server"),
+    },
+  }));
+
   let data: any = {};
-  try { data = JSON.parse(bodyText); } catch { /* non-JSON (HTML/error page) */ }
+  try { data = JSON.parse(bodyText); } catch { /* HTML/error page */ }
+
   if (!res.ok || !data.access_token) {
-    const snippet = bodyText.slice(0, 200).replace(/\s+/g, " ");
-    console.error("Co-op token error:", res.status, url, snippet);
-    throw new Error(
-      `Token request to ${url} failed (HTTP ${res.status}). ` +
-      `Upstream returned ${data?.error || data?.message || (bodyText.startsWith("<") ? "an HTML page" : "non-JSON")}: ${snippet}`,
-    );
+    console.error(JSON.stringify({
+      evt: "coop_token_error",
+      correlationId,
+      url,
+      status: res.status,
+      raw_body: bodyText.slice(0, 1000),
+    }));
+    throw new UpstreamError(res.status, url, bodyText);
   }
   const ttlMs = (Number(data.expires_in) || 3600) * 1000;
   cachedToken = { token: data.access_token, expiresAt: now + ttlMs };
