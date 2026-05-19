@@ -198,10 +198,19 @@ async function getCoopTokenFromCfg(cfg: CoopConfig) {
   const url = cfg.tokenUrl.includes("grant_type=")
     ? cfg.tokenUrl
     : `${cfg.tokenUrl}?grant_type=client_credentials`;
-  const res = await fetch(url, { headers: { Authorization: `Basic ${creds}` } });
-  const data = await res.json();
+  const res = await fetch(url, {
+    headers: { Authorization: `Basic ${creds}`, Accept: "application/json" },
+  });
+  const bodyText = await res.text();
+  let data: any = {};
+  try { data = JSON.parse(bodyText); } catch { /* non-JSON (HTML/error page) */ }
   if (!res.ok || !data.access_token) {
-    throw new Error(`Token failed: ${JSON.stringify(data)}`);
+    const snippet = bodyText.slice(0, 200).replace(/\s+/g, " ");
+    console.error("Co-op token error:", res.status, url, snippet);
+    throw new Error(
+      `Token request to ${url} failed (HTTP ${res.status}). ` +
+      `Upstream returned ${data?.error || data?.message || (bodyText.startsWith("<") ? "an HTML page" : "non-JSON")}: ${snippet}`,
+    );
   }
   const ttlMs = (Number(data.expires_in) || 3600) * 1000;
   cachedToken = { token: data.access_token, expiresAt: now + ttlMs };
