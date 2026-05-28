@@ -347,6 +347,7 @@ Deno.serve(async (req) => {
           phone_number: normalizedPhone,
           status: "PENDING",
           raw_request: coopPayload,
+          correlation_id: correlationId,
           updated_at: new Date().toISOString(),
         })
         .eq("id", existing.id);
@@ -362,8 +363,10 @@ Deno.serve(async (req) => {
         narration: coopPayload.Narration,
         initiated_by: userData.user.id,
         raw_request: coopPayload,
+        correlation_id: correlationId,
       });
     }
+
 
     // LIVE MODE — Co-op Bank OpenAPI driven entirely by COOP_CONFIG_JSON.
     let cfg: CoopConfig;

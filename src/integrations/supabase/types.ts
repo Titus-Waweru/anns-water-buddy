@@ -300,6 +300,7 @@ export type Database = {
         Row: {
           amount: number
           branch_id: string | null
+          correlation_id: string | null
           created_at: string
           id: string
           initiated_by: string | null
@@ -321,6 +322,7 @@ export type Database = {
         Insert: {
           amount?: number
           branch_id?: string | null
+          correlation_id?: string | null
           created_at?: string
           id?: string
           initiated_by?: string | null
@@ -342,6 +344,7 @@ export type Database = {
         Update: {
           amount?: number
           branch_id?: string | null
+          correlation_id?: string | null
           created_at?: string
           id?: string
           initiated_by?: string | null

@@ -2,8 +2,9 @@ import { Link, useLocation } from "react-router-dom";
 import { useState, useEffect } from "react";
 import {
   LayoutDashboard, Package, ShoppingCart, Truck, Users, Building, FileText, BarChart3, Menu, X, LogOut,
-  DollarSign, Wrench, Receipt, Factory, Target, ShieldAlert, Timer, AlertTriangle, GitBranch,
+  DollarSign, Wrench, Receipt, Factory, Target, ShieldAlert, Timer, AlertTriangle, GitBranch, Activity,
 } from "lucide-react";
+
 import { useAuth } from "@/context/AuthContext";
 import { useData } from "@/context/DataContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -39,8 +40,10 @@ const allNavItems: NavItem[] = [
   { title: "Vouchers", path: "/app/vouchers", icon: Receipt, roles: ["superadmin", "supervisor"] },
   { title: "Teams", path: "/app/teams", icon: Users, roles: ["superadmin", "supervisor"] },
   { title: "Branches", path: "/app/branches", icon: Building, roles: ["superadmin", "supervisor"] },
+  { title: "Payments Trace", path: "/app/payments-trace", icon: Activity, roles: ["superadmin", "supervisor"] },
   { title: "System Control", path: "/app/system-control", icon: ShieldAlert, roles: ["superadmin"] },
   { title: "Subscription", path: "/app/subscription", icon: Timer, roles: ["superadmin"] },
+
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
