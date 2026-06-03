@@ -5,3 +5,7 @@ verify_jwt = false
 
 [functions.mpesa-egress-check]
 verify_jwt = false
+
+[functions.mpesa-proxy-verify]
+verify_jwt = false
+
