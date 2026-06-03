@@ -172,6 +172,18 @@ function parseCoopConfig(): CoopConfig {
   tokenUrl = tokenUrl || "https://openapi.co-opbank.co.ke/token";
   stkUrl = stkUrl || "https://openapi.co-opbank.co.ke/FT/stk/1.0.0";
 
+  // PROXY OVERRIDE — when COOP_PROXY_BASE_URL is set (e.g. https://wonderaqua.co.ke/coop),
+  // rewrite Co-op host so all outbound traffic egresses from the whitelisted AWS IP
+  // (13.62.244.124) instead of the Supabase Edge Functions egress pool.
+  const proxyBase = (Deno.env.get("COOP_PROXY_BASE_URL") || "").replace(/\/+$/, "");
+  if (proxyBase) {
+    const swap = (u: string) =>
+      u.replace(/^https?:\/\/openapi\.co-opbank\.co\.ke/i, proxyBase);
+    tokenUrl = swap(tokenUrl);
+    stkUrl = swap(stkUrl);
+  }
+
+
   if (!user || !pass) {
     throw new Error(
       "COOP_CONFIG_JSON has no credentials. Expected one of: auth.basic{username,password}, " +
