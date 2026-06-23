@@ -460,6 +460,9 @@ Deno.serve(async (req) => {
           Accept: "application/json",
           "User-Agent": "WonderAquaPOS/1.0 (+https://wonderaqua.co.ke)",
           "X-Correlation-Id": correlationId,
+          ...(Deno.env.get("COOP_PROXY_SECRET")
+            ? { "X-Proxy-Secret": Deno.env.get("COOP_PROXY_SECRET")! }
+            : {}),
         },
         body: JSON.stringify(coopPayload),
       });
