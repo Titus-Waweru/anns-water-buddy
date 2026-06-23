@@ -207,12 +207,35 @@ class UpstreamError extends Error {
   url: string;
   bodySnippet: string;
   isHtml: boolean;
+  rawBody: string;
   constructor(status: number, url: string, bodyText: string) {
     super(`Upstream ${status} from ${url}`);
     this.status = status;
     this.url = url;
+    this.rawBody = bodyText;
     this.bodySnippet = bodyText.slice(0, 500).replace(/\s+/g, " ").trim();
     this.isHtml = bodyText.trimStart().startsWith("<");
+  }
+}
+
+function getProxyBase(): string {
+  return (Deno.env.get("COOP_PROXY_BASE_URL") || "").replace(/\/+$/, "");
+}
+
+function usesProxy(url: string): boolean {
+  const proxyBase = getProxyBase();
+  return Boolean(proxyBase && url.toLowerCase().startsWith(proxyBase.toLowerCase()));
+}
+
+function redactTokenResponse(bodyText: string): unknown {
+  try {
+    const parsed = JSON.parse(bodyText);
+    if (parsed && typeof parsed === "object" && "access_token" in parsed) {
+      return { ...parsed, access_token: "[REDACTED]" };
+    }
+    return parsed;
+  } catch {
+    return bodyText.slice(0, 1000);
   }
 }
 
@@ -222,14 +245,15 @@ async function getCoopTokenFromCfg(cfg: CoopConfig, correlationId: string) {
     return cachedToken.token;
   }
   const creds = btoa(`${cfg.consumerKey}:${cfg.consumerSecret}`);
-  const url = cfg.tokenUrl.includes("grant_type=")
-    ? cfg.tokenUrl
-    : `${cfg.tokenUrl}?grant_type=client_credentials`;
+  const url = cfg.tokenUrl.split("?")[0];
+  const form = new URLSearchParams({ grant_type: "client_credentials" });
   const t0 = Date.now();
   const res = await fetch(url, {
+    method: "POST",
     headers: {
       Authorization: `Basic ${creds}`,
       Accept: "application/json",
+      "Content-Type": "application/x-www-form-urlencoded",
       "User-Agent": "WonderAquaPOS/1.0 (+https://wonderaqua.co.ke)",
       "Cache-Control": "no-cache",
       "X-Correlation-Id": correlationId,
@@ -237,6 +261,7 @@ async function getCoopTokenFromCfg(cfg: CoopConfig, correlationId: string) {
         ? { "X-Proxy-Secret": Deno.env.get("COOP_PROXY_SECRET")! }
         : {}),
     },
+    body: form.toString(),
   });
   const bodyText = await res.text();
   const ms = Date.now() - t0;
@@ -244,13 +269,19 @@ async function getCoopTokenFromCfg(cfg: CoopConfig, correlationId: string) {
     evt: "coop_token",
     correlationId,
     url,
+    method: "POST",
+    content_type: "application/x-www-form-urlencoded",
+    uses_proxy: usesProxy(url),
     status: res.status,
     duration_ms: ms,
     upstream_headers: {
       "x-akamai-request-id": res.headers.get("x-akamai-request-id"),
       "x-cache": res.headers.get("x-cache"),
+      "x-proxy-egress-ip": res.headers.get("x-proxy-egress-ip"),
+      "x-proxy-upstream": res.headers.get("x-proxy-upstream"),
       "server": res.headers.get("server"),
     },
+    response: redactTokenResponse(bodyText),
   }));
 
   let data: any = {};
@@ -261,6 +292,8 @@ async function getCoopTokenFromCfg(cfg: CoopConfig, correlationId: string) {
       evt: "coop_token_error",
       correlationId,
       url,
+      method: "POST",
+      uses_proxy: usesProxy(url),
       status: res.status,
       raw_body: bodyText.slice(0, 1000),
     }));
@@ -353,6 +386,18 @@ Deno.serve(async (req) => {
       Narration: narration || `Sale ${sale_id.slice(0, 8)}`,
     };
 
+    console.log(JSON.stringify({
+      evt: "coop_stk_flow_start",
+      correlationId,
+      sale_id,
+      message_reference: messageReference,
+      proxy_base_configured: Boolean(getProxyBase()),
+      proxy_base: getProxyBase() || null,
+      proxy_secret_configured: Boolean(Deno.env.get("COOP_PROXY_SECRET")),
+      callback_url: callbackUrl,
+      payload: coopPayload,
+    }));
+
     // Upsert PENDING payment row
     if (existing) {
       await admin
@@ -387,6 +432,16 @@ Deno.serve(async (req) => {
     let cfg: CoopConfig;
     try {
       cfg = parseCoopConfig();
+      console.log(JSON.stringify({
+        evt: "coop_config_loaded",
+        correlationId,
+        token_url: cfg.tokenUrl,
+        stk_url: cfg.stkUrl,
+        token_uses_proxy: usesProxy(cfg.tokenUrl),
+        stk_uses_proxy: usesProxy(cfg.stkUrl),
+        proxy_base_configured: Boolean(getProxyBase()),
+        proxy_secret_configured: Boolean(Deno.env.get("COOP_PROXY_SECRET")),
+      }));
     } catch (e) {
       console.error(JSON.stringify({
         evt: "coop_config_error",
@@ -432,6 +487,15 @@ Deno.serve(async (req) => {
           result_code: String(upstreamStatus),
           result_description:
             `Upstream ${errorCode} (${upstreamStatus}) — ${bodySnippet.slice(0, 180)}`,
+          raw_payload: {
+            stage: upstreamUrl.includes("/token") ? "TOKEN" : "STK",
+            error_code: errorCode,
+            upstream_status: upstreamStatus,
+            upstream_url: upstreamUrl,
+            raw_body: bodySnippet,
+            correlation_id: correlationId,
+            uses_proxy: usesProxy(upstreamUrl),
+          },
           updated_at: new Date().toISOString(),
         })
         .eq("message_reference", messageReference);
@@ -476,8 +540,18 @@ Deno.serve(async (req) => {
         sale_id,
         message_reference: messageReference,
         url: cfg.stkUrl,
+        method: "POST",
+        uses_proxy: usesProxy(cfg.stkUrl),
+        request_payload: coopPayload,
         status: stkRes.status,
         duration_ms: Date.now() - t0,
+        upstream_headers: {
+          "x-akamai-request-id": stkRes.headers.get("x-akamai-request-id"),
+          "x-cache": stkRes.headers.get("x-cache"),
+          "x-proxy-egress-ip": stkRes.headers.get("x-proxy-egress-ip"),
+          "x-proxy-upstream": stkRes.headers.get("x-proxy-upstream"),
+          "server": stkRes.headers.get("server"),
+        },
         response: stkData?.MessageReference ? stkData : stkText.slice(0, 500),
       }));
 
@@ -504,6 +578,24 @@ Deno.serve(async (req) => {
         });
         finalText = await finalRes.text();
         try { finalData = JSON.parse(finalText); } catch { finalData = {}; }
+        console.log(JSON.stringify({
+          evt: "coop_stk_retry",
+          correlationId,
+          sale_id,
+          message_reference: messageReference,
+          url: cfg.stkUrl,
+          method: "POST",
+          uses_proxy: usesProxy(cfg.stkUrl),
+          status: finalRes.status,
+          upstream_headers: {
+            "x-akamai-request-id": finalRes.headers.get("x-akamai-request-id"),
+            "x-cache": finalRes.headers.get("x-cache"),
+            "x-proxy-egress-ip": finalRes.headers.get("x-proxy-egress-ip"),
+            "x-proxy-upstream": finalRes.headers.get("x-proxy-upstream"),
+            "server": finalRes.headers.get("server"),
+          },
+          response: finalData?.MessageReference ? finalData : finalText.slice(0, 500),
+        }));
       }
 
       if (!finalRes.ok) {
@@ -523,9 +615,17 @@ Deno.serve(async (req) => {
           .from("payments")
           .update({
             status: "FAILED",
+            result_code: String(finalRes.status),
             result_description:
               finalData?.ResultDesc || finalData?.message || "STK push request failed",
-            raw_payload: finalData,
+            raw_payload: {
+              stage: "STK",
+              status: finalRes.status,
+              url: cfg.stkUrl,
+              uses_proxy: usesProxy(cfg.stkUrl),
+              response: finalData && Object.keys(finalData).length > 0 ? finalData : finalText.slice(0, 1000),
+              correlation_id: correlationId,
+            },
           })
           .eq("message_reference", messageReference);
         return new Response(
@@ -546,6 +646,9 @@ Deno.serve(async (req) => {
           message_reference: messageReference,
           response: finalData,
           correlation_id: correlationId,
+          token_url: cfg.tokenUrl,
+          stk_url: cfg.stkUrl,
+          uses_proxy: usesProxy(cfg.tokenUrl) && usesProxy(cfg.stkUrl),
         }),
         { status: 200, headers: respHeaders },
       );
