@@ -36,6 +36,15 @@ sudo certbot --nginx -d wonderaqua.co.ke --non-interactive --agree-tos -m ops@wo
 sudo cp aws-proxy/nginx/coop-proxy.conf /etc/nginx/sites-available/coop-proxy.conf
 sudo ln -sf /etc/nginx/sites-available/coop-proxy.conf /etc/nginx/sites-enabled/coop-proxy.conf
 
+# 2b. REQUIRED — set the shared secret nginx will check on each /coop/* call.
+#     Use the same value you store in the Lovable Cloud secret COOP_PROXY_SECRET.
+SECRET="$(openssl rand -hex 32)"            # generate once, save it
+echo "Use this as COOP_PROXY_SECRET in Lovable Cloud: $SECRET"
+sudo tee /etc/nginx/coop-proxy-secret.conf >/dev/null <<EOF
+map "" \$coop_expected_secret { default "$SECRET"; }
+EOF
+sudo chmod 600 /etc/nginx/coop-proxy-secret.conf
+
 # 3. Validate + reload
 sudo nginx -t && sudo systemctl reload nginx
 
