@@ -31,7 +31,7 @@ Deno.serve(async (req) => {
   // Hit the proxy's /token endpoint with the internal proxy secret, but WITHOUT
   // bank credentials. This proves the Edge Function can reach nginx on AWS;
   // Co-op should then reject only at the bank-auth layer.
-  const url = `${proxyBase}/token?grant_type=client_credentials`;
+  const url = `${proxyBase}/token`;
   const t0 = Date.now();
   let probe: any = {};
   try {
