@@ -233,6 +233,9 @@ async function getCoopTokenFromCfg(cfg: CoopConfig, correlationId: string) {
       "User-Agent": "WonderAquaPOS/1.0 (+https://wonderaqua.co.ke)",
       "Cache-Control": "no-cache",
       "X-Correlation-Id": correlationId,
+      ...(Deno.env.get("COOP_PROXY_SECRET")
+        ? { "X-Proxy-Secret": Deno.env.get("COOP_PROXY_SECRET")! }
+        : {}),
     },
   });
   const bodyText = await res.text();
