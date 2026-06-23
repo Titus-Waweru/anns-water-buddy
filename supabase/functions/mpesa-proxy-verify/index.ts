@@ -28,25 +28,32 @@ Deno.serve(async (req) => {
     );
   }
 
-  // Hit the proxy's /token endpoint WITHOUT credentials.
-  // - If proxy is up + reachable: Co-op returns 401/400 JSON (proof we reached the bank via AWS).
-  // - If proxy is bypassed: we'd get Akamai 403 HTML (same WAF page we saw before).
+  // Hit the proxy's /token endpoint with the internal proxy secret, but WITHOUT
+  // bank credentials. This proves the Edge Function can reach nginx on AWS;
+  // Co-op should then reject only at the bank-auth layer.
   const url = `${proxyBase}/token?grant_type=client_credentials`;
   const t0 = Date.now();
   let probe: any = {};
   try {
     const res = await fetch(url, {
+      method: "POST",
       headers: {
         "X-Correlation-Id": correlationId,
         Accept: "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
         "User-Agent": "WonderAquaPOS-ProxyVerify/1.0",
+        ...(Deno.env.get("COOP_PROXY_SECRET")
+          ? { "X-Proxy-Secret": Deno.env.get("COOP_PROXY_SECRET")! }
+          : {}),
       },
+      body: new URLSearchParams({ grant_type: "client_credentials" }).toString(),
     });
     const body = await res.text();
     const isHtml = body.trimStart().startsWith("<");
     const isAkamai = /Access Denied|edgesuite\.net/i.test(body);
     probe = {
       proxy_url: url,
+      proxy_secret_configured: Boolean(Deno.env.get("COOP_PROXY_SECRET")),
       proxy_status: res.status,
       duration_ms: Date.now() - t0,
       response_is_html: isHtml,
