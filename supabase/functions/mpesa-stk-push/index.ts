@@ -207,12 +207,35 @@ class UpstreamError extends Error {
   url: string;
   bodySnippet: string;
   isHtml: boolean;
+  rawBody: string;
   constructor(status: number, url: string, bodyText: string) {
     super(`Upstream ${status} from ${url}`);
     this.status = status;
     this.url = url;
+    this.rawBody = bodyText;
     this.bodySnippet = bodyText.slice(0, 500).replace(/\s+/g, " ").trim();
     this.isHtml = bodyText.trimStart().startsWith("<");
+  }
+}
+
+function getProxyBase(): string {
+  return (Deno.env.get("COOP_PROXY_BASE_URL") || "").replace(/\/+$/, "");
+}
+
+function usesProxy(url: string): boolean {
+  const proxyBase = getProxyBase();
+  return Boolean(proxyBase && url.toLowerCase().startsWith(proxyBase.toLowerCase()));
+}
+
+function redactTokenResponse(bodyText: string): unknown {
+  try {
+    const parsed = JSON.parse(bodyText);
+    if (parsed && typeof parsed === "object" && "access_token" in parsed) {
+      return { ...parsed, access_token: "[REDACTED]" };
+    }
+    return parsed;
+  } catch {
+    return bodyText.slice(0, 1000);
   }
 }
 
@@ -222,14 +245,15 @@ async function getCoopTokenFromCfg(cfg: CoopConfig, correlationId: string) {
     return cachedToken.token;
   }
   const creds = btoa(`${cfg.consumerKey}:${cfg.consumerSecret}`);
-  const url = cfg.tokenUrl.includes("grant_type=")
-    ? cfg.tokenUrl
-    : `${cfg.tokenUrl}?grant_type=client_credentials`;
+  const url = cfg.tokenUrl.split("?")[0];
+  const form = new URLSearchParams({ grant_type: "client_credentials" });
   const t0 = Date.now();
   const res = await fetch(url, {
+    method: "POST",
     headers: {
       Authorization: `Basic ${creds}`,
       Accept: "application/json",
+      "Content-Type": "application/x-www-form-urlencoded",
       "User-Agent": "WonderAquaPOS/1.0 (+https://wonderaqua.co.ke)",
       "Cache-Control": "no-cache",
       "X-Correlation-Id": correlationId,
@@ -237,6 +261,7 @@ async function getCoopTokenFromCfg(cfg: CoopConfig, correlationId: string) {
         ? { "X-Proxy-Secret": Deno.env.get("COOP_PROXY_SECRET")! }
         : {}),
     },
+    body: form.toString(),
   });
   const bodyText = await res.text();
   const ms = Date.now() - t0;
@@ -244,13 +269,19 @@ async function getCoopTokenFromCfg(cfg: CoopConfig, correlationId: string) {
     evt: "coop_token",
     correlationId,
     url,
+    method: "POST",
+    content_type: "application/x-www-form-urlencoded",
+    uses_proxy: usesProxy(url),
     status: res.status,
     duration_ms: ms,
     upstream_headers: {
       "x-akamai-request-id": res.headers.get("x-akamai-request-id"),
       "x-cache": res.headers.get("x-cache"),
+      "x-proxy-egress-ip": res.headers.get("x-proxy-egress-ip"),
+      "x-proxy-upstream": res.headers.get("x-proxy-upstream"),
       "server": res.headers.get("server"),
     },
+    response: redactTokenResponse(bodyText),
   }));
 
   let data: any = {};
@@ -261,6 +292,8 @@ async function getCoopTokenFromCfg(cfg: CoopConfig, correlationId: string) {
       evt: "coop_token_error",
       correlationId,
       url,
+      method: "POST",
+      uses_proxy: usesProxy(url),
       status: res.status,
       raw_body: bodyText.slice(0, 1000),
     }));
