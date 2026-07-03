@@ -139,17 +139,32 @@ function parseCoopConfig(): CoopConfig {
 
   let tokenUrl = "";
   let stkUrl = "";
+  // Raw base64 from the token request's `Authorization: Basic <b64>` header,
+  // preserved verbatim so we send back to Co-op exactly what the Postman
+  // collection ships — no decode / re-encode round trip.
+  let tokenRawBasicAuth: string | undefined;
 
   walkItems(parsed.item || [], (it) => {
     const name = String(it.name || "").toLowerCase();
     const url = urlToString(it.request?.url);
     const lower = url.toLowerCase();
+    const isTokenItem =
+      name.includes("token") || lower.endsWith("/token") || lower.includes("/token?");
     if (url) {
-      if (!tokenUrl && (name.includes("token") || lower.endsWith("/token") || lower.includes("/token?"))) {
+      if (!tokenUrl && isTokenItem) {
         tokenUrl = url.split("?")[0];
       }
       if (!stkUrl && (name.includes("stk") || lower.includes("/stk/"))) {
         stkUrl = url;
+      }
+    }
+    // Preserve raw Authorization header from the token request verbatim.
+    if (isTokenItem && !tokenRawBasicAuth && Array.isArray(it.request?.header)) {
+      for (const h of it.request.header) {
+        if (String(h?.key || "").toLowerCase() !== "authorization") continue;
+        const val = String(h?.value || "");
+        const m = val.match(/Basic\s+([A-Za-z0-9+/=]+)/i);
+        if (m) { tokenRawBasicAuth = m[1]; break; }
       }
     }
     // 3) Per-request basic auth fallback
@@ -165,6 +180,19 @@ function parseCoopConfig(): CoopConfig {
       pass = pass || a.pass;
     }
   });
+
+  // If we captured a raw Basic header, also derive user/pass from it as a
+  // fallback for anything else that expects them (e.g. logs only — no re-encode).
+  if (tokenRawBasicAuth && (!user || !pass)) {
+    try {
+      const decoded = atob(tokenRawBasicAuth);
+      const idx = decoded.indexOf(":");
+      if (idx > 0) {
+        user = user || decoded.slice(0, idx);
+        pass = pass || decoded.slice(idx + 1);
+      }
+    } catch { /* ignore */ }
+  }
 
   // 5) Resolve {{var}} placeholders in URLs against collection vars
   const resolveVars = (s: string) =>
@@ -196,11 +224,17 @@ function parseCoopConfig(): CoopConfig {
     );
   }
 
+  const authMethod: CoopConfig["authMethod"] = tokenRawBasicAuth
+    ? "raw_header"
+    : (parsed?.auth?.basic ? "basic_auth_object" : "reconstructed");
+
   cachedConfig = {
     tokenUrl,
     stkUrl,
     consumerKey: user,
     consumerSecret: pass,
+    rawBasicAuth: tokenRawBasicAuth,
+    authMethod,
   };
   return cachedConfig;
 }
