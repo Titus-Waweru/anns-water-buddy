@@ -282,9 +282,30 @@ async function getCoopTokenFromCfg(cfg: CoopConfig, correlationId: string) {
   if (cachedToken && cachedToken.expiresAt > now + 30_000) {
     return cachedToken.token;
   }
-  const creds = btoa(`${cfg.consumerKey}:${cfg.consumerSecret}`);
+  // Prefer the verbatim Basic <base64> string from the Postman collection's
+  // token request (Co-op support said the collection's Authorization must be
+  // consumed exactly as provided). Only reconstruct via btoa() as a fallback.
+  const creds = cfg.rawBasicAuth ?? btoa(`${cfg.consumerKey}:${cfg.consumerSecret}`);
   const url = cfg.tokenUrl.split("?")[0];
   const form = new URLSearchParams({ grant_type: "client_credentials" });
+
+  // Debug — safe, non-secret: shows which auth path was selected, confirms
+  // credentials were extracted, and shows the exact token URL being called.
+  console.log(JSON.stringify({
+    evt: "coop_token_auth_debug",
+    correlationId,
+    auth_method: cfg.authMethod,
+    raw_basic_auth_present: Boolean(cfg.rawBasicAuth),
+    consumer_key_extracted: Boolean(cfg.consumerKey),
+    consumer_secret_extracted: Boolean(cfg.consumerSecret),
+    consumer_key_len: cfg.consumerKey?.length ?? 0,
+    consumer_secret_len: cfg.consumerSecret?.length ?? 0,
+    basic_creds_len: creds.length,
+    basic_creds_prefix: creds.slice(0, 6),
+    token_url: url,
+    uses_proxy: usesProxy(url),
+  }));
+
   const t0 = Date.now();
   const res = await fetch(url, {
     method: "POST",
@@ -308,6 +329,7 @@ async function getCoopTokenFromCfg(cfg: CoopConfig, correlationId: string) {
     correlationId,
     url,
     method: "POST",
+    auth_method: cfg.authMethod,
     content_type: "application/x-www-form-urlencoded",
     uses_proxy: usesProxy(url),
     status: res.status,
