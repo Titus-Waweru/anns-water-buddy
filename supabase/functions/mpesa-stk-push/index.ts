@@ -28,6 +28,10 @@ type CoopConfig = {
   stkUrl: string;
   consumerKey: string;
   consumerSecret: string;
+  // If the Postman collection ships a pre-encoded `Authorization: Basic <b64>`
+  // on the token request, preserve it verbatim instead of decode→re-encode.
+  rawBasicAuth?: string;
+  authMethod: "raw_header" | "basic_auth_object" | "reconstructed";
 };
 let cachedConfig: CoopConfig | null = null;
 
