@@ -28,6 +28,10 @@ type CoopConfig = {
   stkUrl: string;
   consumerKey: string;
   consumerSecret: string;
+  // If the Postman collection ships a pre-encoded `Authorization: Basic <b64>`
+  // on the token request, preserve it verbatim instead of decode→re-encode.
+  rawBasicAuth?: string;
+  authMethod: "raw_header" | "basic_auth_object" | "reconstructed";
 };
 let cachedConfig: CoopConfig | null = null;
 
@@ -135,17 +139,32 @@ function parseCoopConfig(): CoopConfig {
 
   let tokenUrl = "";
   let stkUrl = "";
+  // Raw base64 from the token request's `Authorization: Basic <b64>` header,
+  // preserved verbatim so we send back to Co-op exactly what the Postman
+  // collection ships — no decode / re-encode round trip.
+  let tokenRawBasicAuth: string | undefined;
 
   walkItems(parsed.item || [], (it) => {
     const name = String(it.name || "").toLowerCase();
     const url = urlToString(it.request?.url);
     const lower = url.toLowerCase();
+    const isTokenItem =
+      name.includes("token") || lower.endsWith("/token") || lower.includes("/token?");
     if (url) {
-      if (!tokenUrl && (name.includes("token") || lower.endsWith("/token") || lower.includes("/token?"))) {
+      if (!tokenUrl && isTokenItem) {
         tokenUrl = url.split("?")[0];
       }
       if (!stkUrl && (name.includes("stk") || lower.includes("/stk/"))) {
         stkUrl = url;
+      }
+    }
+    // Preserve raw Authorization header from the token request verbatim.
+    if (isTokenItem && !tokenRawBasicAuth && Array.isArray(it.request?.header)) {
+      for (const h of it.request.header) {
+        if (String(h?.key || "").toLowerCase() !== "authorization") continue;
+        const val = String(h?.value || "");
+        const m = val.match(/Basic\s+([A-Za-z0-9+/=]+)/i);
+        if (m) { tokenRawBasicAuth = m[1]; break; }
       }
     }
     // 3) Per-request basic auth fallback
@@ -161,6 +180,19 @@ function parseCoopConfig(): CoopConfig {
       pass = pass || a.pass;
     }
   });
+
+  // If we captured a raw Basic header, also derive user/pass from it as a
+  // fallback for anything else that expects them (e.g. logs only — no re-encode).
+  if (tokenRawBasicAuth && (!user || !pass)) {
+    try {
+      const decoded = atob(tokenRawBasicAuth);
+      const idx = decoded.indexOf(":");
+      if (idx > 0) {
+        user = user || decoded.slice(0, idx);
+        pass = pass || decoded.slice(idx + 1);
+      }
+    } catch { /* ignore */ }
+  }
 
   // 5) Resolve {{var}} placeholders in URLs against collection vars
   const resolveVars = (s: string) =>
@@ -192,11 +224,17 @@ function parseCoopConfig(): CoopConfig {
     );
   }
 
+  const authMethod: CoopConfig["authMethod"] = tokenRawBasicAuth
+    ? "raw_header"
+    : (parsed?.auth?.basic ? "basic_auth_object" : "reconstructed");
+
   cachedConfig = {
     tokenUrl,
     stkUrl,
     consumerKey: user,
     consumerSecret: pass,
+    rawBasicAuth: tokenRawBasicAuth,
+    authMethod,
   };
   return cachedConfig;
 }
@@ -244,9 +282,30 @@ async function getCoopTokenFromCfg(cfg: CoopConfig, correlationId: string) {
   if (cachedToken && cachedToken.expiresAt > now + 30_000) {
     return cachedToken.token;
   }
-  const creds = btoa(`${cfg.consumerKey}:${cfg.consumerSecret}`);
+  // Prefer the verbatim Basic <base64> string from the Postman collection's
+  // token request (Co-op support said the collection's Authorization must be
+  // consumed exactly as provided). Only reconstruct via btoa() as a fallback.
+  const creds = cfg.rawBasicAuth ?? btoa(`${cfg.consumerKey}:${cfg.consumerSecret}`);
   const url = cfg.tokenUrl.split("?")[0];
   const form = new URLSearchParams({ grant_type: "client_credentials" });
+
+  // Debug — safe, non-secret: shows which auth path was selected, confirms
+  // credentials were extracted, and shows the exact token URL being called.
+  console.log(JSON.stringify({
+    evt: "coop_token_auth_debug",
+    correlationId,
+    auth_method: cfg.authMethod,
+    raw_basic_auth_present: Boolean(cfg.rawBasicAuth),
+    consumer_key_extracted: Boolean(cfg.consumerKey),
+    consumer_secret_extracted: Boolean(cfg.consumerSecret),
+    consumer_key_len: cfg.consumerKey?.length ?? 0,
+    consumer_secret_len: cfg.consumerSecret?.length ?? 0,
+    basic_creds_len: creds.length,
+    basic_creds_prefix: creds.slice(0, 6),
+    token_url: url,
+    uses_proxy: usesProxy(url),
+  }));
+
   const t0 = Date.now();
   const res = await fetch(url, {
     method: "POST",
@@ -270,6 +329,7 @@ async function getCoopTokenFromCfg(cfg: CoopConfig, correlationId: string) {
     correlationId,
     url,
     method: "POST",
+    auth_method: cfg.authMethod,
     content_type: "application/x-www-form-urlencoded",
     uses_proxy: usesProxy(url),
     status: res.status,
