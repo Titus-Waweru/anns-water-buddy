@@ -23,11 +23,15 @@ export default function Sales() {
   const [open, setOpen] = useState(false);
   const [receiptData, setReceiptData] = useState<any>(null);
   const [mpesaPhone, setMpesaPhone] = useState("");
-  const [stkPending, setStkPending] = useState<{ saleId: string; messageRef: string } | null>(null);
-  const [stkStatus, setStkStatus] = useState<"idle" | "sending" | "waiting" | "failed">("idle");
+  const [stkPending, setStkPending] = useState<{ saleId: string; messageRef: string; startedAt: number } | null>(null);
+  const [stkStatus, setStkStatus] = useState<"idle" | "sending" | "waiting" | "failed" | "timeout" | "cancelled">("idle");
+  const [stkElapsed, setStkElapsed] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
   const idempotencyKeyRef = useRef<string | null>(null);
   const pollRef = useRef<number | null>(null);
+  const clockRef = useRef<number | null>(null);
+
   const [form, setForm] = useState({
     customerId: "",
     productId: "",
