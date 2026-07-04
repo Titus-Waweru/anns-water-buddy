@@ -436,19 +436,27 @@ Deno.serve(async (req) => {
       Deno.env.get("COOP_CALLBACK_URL") ||
       `${supabaseUrl}/functions/v1/mpesa-callback`;
 
+    const operatorCode = Deno.env.get("COOP_OPERATOR_CODE") || "";
+    if (!operatorCode) {
+      console.warn(JSON.stringify({
+        evt: "coop_operator_code_missing",
+        correlationId,
+        message: "COOP_OPERATOR_CODE env var is not set — Co-op will reject the STK request.",
+      }));
+    }
+
     const coopPayload = {
       MessageReference: messageReference,
       CallBackUrl: callbackUrl,
-      callbackUrl: callbackUrl,
-      AccountReference: sale_id.slice(0, 12),
-      accountReference: sale_id.slice(0, 12),
-      Amount: Number(amount),
-      transactionAmount: Number(amount),
-      MSISDN: normalizedPhone,
-      customerMobileNumber: normalizedPhone,
-      Currency: "KES",
-      transactionCurrency: "KES",
+      OperatorCode: operatorCode,
+      TransactionCurrency: "KES",
+      MobileNumber: normalizedPhone,
       Narration: narration || `Sale ${sale_id.slice(0, 8)}`,
+      Amount: Number(amount),
+      MessageDateTime: new Date().toISOString(),
+      OtherDetails: [
+        { Name: "Wonder Aqua", Value: "1" },
+      ],
     };
 
     console.log(JSON.stringify({
