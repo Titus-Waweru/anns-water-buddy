@@ -340,7 +340,7 @@ export default function Sales() {
 
   const closeDialog = () => {
     if (stkStatus === "waiting" || stkStatus === "sending") {
-      toast.info("Payment still pending. Cancel by retrying or wait for callback.");
+      toast.info("Cancel the pending STK first, or wait for the customer to complete payment.");
       return;
     }
     setOpen(false);
@@ -350,6 +350,8 @@ export default function Sales() {
     setForm({ customerId: "", productId: "", quantity: 1, discountType: "fixed", discountValue: 0, paymentMode: "Cash" });
     setMpesaPhone("");
   };
+
+  const showRetry = stkPending && (stkStatus === "failed" || stkStatus === "timeout" || stkStatus === "cancelled");
 
   return (
     <div className="space-y-6">
@@ -368,31 +370,56 @@ export default function Sales() {
             {/* STK in progress overlay */}
             {stkPending && (stkStatus === "waiting" || stkStatus === "sending") && (
               <Card className="bg-primary/5 border-primary/20">
-                <CardContent className="p-4 text-center space-y-2">
-                  <Loader2 className="h-8 w-8 mx-auto text-primary animate-spin" />
-                  <p className="font-medium">Awaiting payment confirmation…</p>
-                  <p className="text-xs text-muted-foreground">
-                    STK push sent to {mpesaPhone}. Ref: {stkPending.messageRef}
-                  </p>
+                <CardContent className="p-4 space-y-3">
+                  <div className="text-center space-y-1">
+                    <Loader2 className="h-8 w-8 mx-auto text-primary animate-spin" />
+                    <p className="font-semibold">Waiting for customer payment…</p>
+                    <p className="text-xs text-muted-foreground">
+                      Will complete automatically once M-Pesa confirms.
+                    </p>
+                  </div>
+                  <div className="text-sm space-y-1 border-t border-primary/10 pt-3">
+                    <p className="flex items-center gap-2 text-success">
+                      <CheckCircle2 className="h-4 w-4" /> STK sent to {mpesaPhone}
+                    </p>
+                    <p className="flex items-center gap-2 text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" /> Waiting for customer to enter M-Pesa PIN…
+                    </p>
+                    <p className="text-[11px] text-muted-foreground font-mono pt-1">
+                      Ref: {stkPending.messageRef} · {stkElapsed}s elapsed
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="w-full gap-2"
+                    onClick={cancelStk}
+                    disabled={isCancelling}
+                  >
+                    <X className="h-4 w-4" /> {isCancelling ? "Cancelling…" : "Cancel STK"}
+                  </Button>
                 </CardContent>
               </Card>
             )}
 
-            {stkPending && stkStatus === "failed" && (
+            {showRetry && (
               <Card className="bg-destructive/5 border-destructive/30">
                 <CardContent className="p-4 text-center space-y-3">
-                  <p className="font-medium text-destructive">Payment not completed</p>
+                  <p className="font-medium text-destructive">
+                    {stkStatus === "timeout" ? "Payment timed out" : stkStatus === "cancelled" ? "STK cancelled" : "Payment not completed"}
+                  </p>
                   <div className="flex gap-2 justify-center">
                     <Button size="sm" variant="outline" onClick={retryStk} className="gap-2">
                       <RefreshCw className="h-4 w-4" /> Retry STK Push
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={closeDialog}>Cancel</Button>
+                    <Button size="sm" variant="ghost" onClick={closeDialog}>Close</Button>
                   </div>
                 </CardContent>
               </Card>
             )}
 
             {!stkPending && (
+
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <Label>Customer (optional)</Label>
