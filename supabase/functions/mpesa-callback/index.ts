@@ -68,7 +68,7 @@ Deno.serve(async (req) => {
     }
 
     if (!messageReference) {
-      console.warn("No MessageReference in callback — ignoring");
+      console.log(JSON.stringify({ evt: "callback_no_message_reference", body }));
       return ok();
     }
 
@@ -79,6 +79,14 @@ Deno.serve(async (req) => {
     const isSuccess = String(resultCode) === "0";
     const status = isSuccess ? "SUCCESS" : "FAILED";
 
+    console.log(JSON.stringify({
+      evt: "callback_received",
+      message_reference: messageReference,
+      result_code: resultCode,
+      result_desc: resultDesc,
+      amount, phone, receipt,
+    }));
+
     // Find the linked payment
     const { data: payment, error: findErr } = await admin
       .from("payments")
@@ -86,18 +94,20 @@ Deno.serve(async (req) => {
       .eq("message_reference", messageReference)
       .maybeSingle();
 
-    if (findErr) console.error("Payment lookup error:", findErr);
+    if (findErr) console.error(JSON.stringify({ evt: "callback_lookup_error", error: findErr.message }));
+
 
     if (!payment) {
-      console.warn(`No payment row for MessageReference=${messageReference}`);
+      console.log(JSON.stringify({ evt: "callback_no_payment_row", message_reference: messageReference }));
       return ok();
     }
 
-    // Idempotency: don't downgrade a SUCCESS
-    if (payment.status === "SUCCESS") {
-      console.log("Payment already SUCCESS, ignoring duplicate callback");
+    // Idempotency: don't overwrite a terminal state
+    if (payment.status === "SUCCESS" || payment.status === "CANCELLED") {
+      console.log(JSON.stringify({ evt: "callback_duplicate_ignored", payment_id: payment.id, current_status: payment.status }));
       return ok();
     }
+
 
     const { error: upErr } = await admin
       .from("payments")
@@ -129,7 +139,7 @@ Deno.serve(async (req) => {
       if (saleErr) console.error("Sale update error:", saleErr);
     }
 
-    console.log(`Callback processed: ref=${messageReference} status=${status}`);
+    console.log(JSON.stringify({ evt: "callback_processed", message_reference: messageReference, status, payment_id: payment.id }));
     return ok();
   } catch (err) {
     console.error("Callback fatal error:", err);

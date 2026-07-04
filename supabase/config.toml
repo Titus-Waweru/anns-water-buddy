@@ -9,3 +9,7 @@ verify_jwt = false
 [functions.mpesa-proxy-verify]
 verify_jwt = false
 
+[functions.mpesa-callback]
+verify_jwt = false
+
+

@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Plus, ShoppingCart, Printer, Smartphone, Loader2, RefreshCw } from "lucide-react";
+import { Plus, ShoppingCart, Printer, Smartphone, Loader2, RefreshCw, X, CheckCircle2 } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import SaleReceipt from "@/components/SaleReceipt";
@@ -23,11 +23,15 @@ export default function Sales() {
   const [open, setOpen] = useState(false);
   const [receiptData, setReceiptData] = useState<any>(null);
   const [mpesaPhone, setMpesaPhone] = useState("");
-  const [stkPending, setStkPending] = useState<{ saleId: string; messageRef: string } | null>(null);
-  const [stkStatus, setStkStatus] = useState<"idle" | "sending" | "waiting" | "failed">("idle");
+  const [stkPending, setStkPending] = useState<{ saleId: string; messageRef: string; startedAt: number } | null>(null);
+  const [stkStatus, setStkStatus] = useState<"idle" | "sending" | "waiting" | "failed" | "timeout" | "cancelled">("idle");
+  const [stkElapsed, setStkElapsed] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
   const idempotencyKeyRef = useRef<string | null>(null);
   const pollRef = useRef<number | null>(null);
+  const clockRef = useRef<number | null>(null);
+
   const [form, setForm] = useState({
     customerId: "",
     productId: "",
@@ -103,12 +107,15 @@ export default function Sales() {
     refetch();
   };
 
-  // ---- Poll for STK payment status ----
+  // ---- Poll for STK payment status (every 2.5s, timeout 2 min) ----
   useEffect(() => {
-    if (!stkPending) return;
-    let attempts = 0;
+    if (!stkPending || stkStatus !== "waiting") return;
+    setStkElapsed(Math.floor((Date.now() - stkPending.startedAt) / 1000));
+
     const tick = async () => {
-      attempts++;
+      const elapsedMs = Date.now() - stkPending.startedAt;
+      setStkElapsed(Math.floor(elapsedMs / 1000));
+
       const { data } = await supabase
         .from("payments")
         .select("status, result_description")
@@ -130,16 +137,32 @@ export default function Sales() {
         toast.error(data.result_description || "Payment failed");
         return;
       }
-      // Timeout after ~2 minutes
-      if (attempts > 40) {
+      if (data?.status === "CANCELLED") {
         if (pollRef.current) window.clearInterval(pollRef.current);
-        setStkStatus("failed");
+        setStkStatus("cancelled");
+        return;
+      }
+      // Automatic 2-minute timeout
+      if (elapsedMs > 120_000) {
+        if (pollRef.current) window.clearInterval(pollRef.current);
+        setStkStatus("timeout");
+        // Mark payment as TIMEOUT so the sale is not locked forever
+        await supabase
+          .from("payments")
+          .update({ status: "CANCELLED", result_code: "TIMEOUT", result_description: "No callback received within 2 minutes" })
+          .eq("message_reference", stkPending.messageRef)
+          .eq("status", "PENDING");
+        await supabase
+          .from("sales")
+          .update({ payment_status: "CANCELLED" })
+          .eq("id", stkPending.saleId)
+          .eq("payment_status", "PENDING");
         toast.error("Payment timed out. You can retry.");
       }
     };
-    pollRef.current = window.setInterval(tick, 3000);
+    pollRef.current = window.setInterval(tick, 2500);
     return () => { if (pollRef.current) window.clearInterval(pollRef.current); };
-  }, [stkPending]);
+  }, [stkPending, stkStatus]);
 
   const sendStkPush = async (saleId: string, phone: string, amount: number) => {
     setStkStatus("sending");
@@ -155,9 +178,8 @@ export default function Sales() {
           data.message || "Payment provider authorization pending. Please retry later.",
           { description: data.correlation_id ? `Ref: ${data.correlation_id}` : undefined },
         );
-        // Keep the sale + payment as PENDING so the cashier can retry.
         if (data.message_reference) {
-          setStkPending({ saleId, messageRef: data.message_reference });
+          setStkPending({ saleId, messageRef: data.message_reference, startedAt: Date.now() });
         }
         return;
       }
@@ -170,16 +192,38 @@ export default function Sales() {
         return;
       }
 
-      setStkPending({ saleId, messageRef: data.message_reference });
+      setStkPending({ saleId, messageRef: data.message_reference, startedAt: Date.now() });
       setStkStatus("waiting");
-      toast.success("STK push sent. Waiting for payment confirmation…");
+      toast.success("STK sent — waiting for customer to enter M-Pesa PIN…");
     } catch (e: any) {
-      // Never let an exception blank-screen the POS.
       console.error("sendStkPush error:", e);
       setStkStatus("failed");
       toast.error("Payment provider unreachable. Please retry later.");
     }
   };
+
+  const cancelStk = async () => {
+    if (!stkPending || isCancelling) return;
+    setIsCancelling(true);
+    try {
+      await supabase
+        .from("payments")
+        .update({ status: "CANCELLED", result_code: "CANCELLED", result_description: "Cancelled by operator" })
+        .eq("message_reference", stkPending.messageRef)
+        .eq("status", "PENDING");
+      await supabase
+        .from("sales")
+        .update({ payment_status: "CANCELLED" })
+        .eq("id", stkPending.saleId)
+        .eq("payment_status", "PENDING");
+      if (pollRef.current) window.clearInterval(pollRef.current);
+      setStkStatus("cancelled");
+      toast.info("STK cancelled. You can send a new request.");
+    } finally {
+      setIsCancelling(false);
+    }
+  };
+
 
   const retryStk = async () => {
     if (!stkPending) return;
@@ -296,7 +340,7 @@ export default function Sales() {
 
   const closeDialog = () => {
     if (stkStatus === "waiting" || stkStatus === "sending") {
-      toast.info("Payment still pending. Cancel by retrying or wait for callback.");
+      toast.info("Cancel the pending STK first, or wait for the customer to complete payment.");
       return;
     }
     setOpen(false);
@@ -306,6 +350,8 @@ export default function Sales() {
     setForm({ customerId: "", productId: "", quantity: 1, discountType: "fixed", discountValue: 0, paymentMode: "Cash" });
     setMpesaPhone("");
   };
+
+  const showRetry = stkPending && (stkStatus === "failed" || stkStatus === "timeout" || stkStatus === "cancelled");
 
   return (
     <div className="space-y-6">
@@ -324,31 +370,56 @@ export default function Sales() {
             {/* STK in progress overlay */}
             {stkPending && (stkStatus === "waiting" || stkStatus === "sending") && (
               <Card className="bg-primary/5 border-primary/20">
-                <CardContent className="p-4 text-center space-y-2">
-                  <Loader2 className="h-8 w-8 mx-auto text-primary animate-spin" />
-                  <p className="font-medium">Awaiting payment confirmation…</p>
-                  <p className="text-xs text-muted-foreground">
-                    STK push sent to {mpesaPhone}. Ref: {stkPending.messageRef}
-                  </p>
+                <CardContent className="p-4 space-y-3">
+                  <div className="text-center space-y-1">
+                    <Loader2 className="h-8 w-8 mx-auto text-primary animate-spin" />
+                    <p className="font-semibold">Waiting for customer payment…</p>
+                    <p className="text-xs text-muted-foreground">
+                      Will complete automatically once M-Pesa confirms.
+                    </p>
+                  </div>
+                  <div className="text-sm space-y-1 border-t border-primary/10 pt-3">
+                    <p className="flex items-center gap-2 text-success">
+                      <CheckCircle2 className="h-4 w-4" /> STK sent to {mpesaPhone}
+                    </p>
+                    <p className="flex items-center gap-2 text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" /> Waiting for customer to enter M-Pesa PIN…
+                    </p>
+                    <p className="text-[11px] text-muted-foreground font-mono pt-1">
+                      Ref: {stkPending.messageRef} · {stkElapsed}s elapsed
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="w-full gap-2"
+                    onClick={cancelStk}
+                    disabled={isCancelling}
+                  >
+                    <X className="h-4 w-4" /> {isCancelling ? "Cancelling…" : "Cancel STK"}
+                  </Button>
                 </CardContent>
               </Card>
             )}
 
-            {stkPending && stkStatus === "failed" && (
+            {showRetry && (
               <Card className="bg-destructive/5 border-destructive/30">
                 <CardContent className="p-4 text-center space-y-3">
-                  <p className="font-medium text-destructive">Payment not completed</p>
+                  <p className="font-medium text-destructive">
+                    {stkStatus === "timeout" ? "Payment timed out" : stkStatus === "cancelled" ? "STK cancelled" : "Payment not completed"}
+                  </p>
                   <div className="flex gap-2 justify-center">
                     <Button size="sm" variant="outline" onClick={retryStk} className="gap-2">
                       <RefreshCw className="h-4 w-4" /> Retry STK Push
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={closeDialog}>Cancel</Button>
+                    <Button size="sm" variant="ghost" onClick={closeDialog}>Close</Button>
                   </div>
                 </CardContent>
               </Card>
             )}
 
             {!stkPending && (
+
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <Label>Customer (optional)</Label>

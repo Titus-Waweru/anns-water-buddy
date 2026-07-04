@@ -7,10 +7,11 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { RefreshCw, Play, Search, Copy, AlertTriangle, CheckCircle2, Clock, XCircle } from "lucide-react";
+import { RefreshCw, Play, Search, Copy, AlertTriangle, CheckCircle2, Clock, XCircle, Trash2 } from "lucide-react";
+
 
 type Payment = {
   id: string;
@@ -33,7 +34,9 @@ const STATUS_META: Record<string, { icon: any; cls: string }> = {
   PENDING: { icon: Clock, cls: "bg-yellow-500/10 text-yellow-600 border-yellow-500/30" },
   SUCCESS: { icon: CheckCircle2, cls: "bg-success/10 text-success border-success/30" },
   FAILED: { icon: XCircle, cls: "bg-destructive/10 text-destructive border-destructive/30" },
+  CANCELLED: { icon: XCircle, cls: "bg-muted text-muted-foreground border-muted-foreground/30" },
 };
+
 
 function StatusBadge({ status }: { status: string }) {
   const m = STATUS_META[status] || STATUS_META.PENDING;
@@ -53,7 +56,7 @@ function isUpstreamBlocked(p: Payment) {
 }
 
 export default function PaymentsTrace() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, isSuperAdmin, user } = useAuth();
   const { toast } = useToast();
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -61,6 +64,37 @@ export default function PaymentsTrace() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Payment | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Payment | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const deletePayment = async (p: Payment) => {
+    setDeleting(true);
+    try {
+      // Audit first (superadmin-only insert policy). If it fails, abort delete.
+      const { error: auditErr } = await supabase.from("payment_deletions_audit").insert({
+        payment_id: p.id,
+        message_reference: p.message_reference,
+        correlation_id: p.correlation_id,
+        sale_id: p.sale_id,
+        amount: p.amount,
+        status: p.status,
+        deleted_by: user?.id,
+        snapshot: p as any,
+      });
+      if (auditErr) throw auditErr;
+      const { error } = await supabase.from("payments").delete().eq("id", p.id);
+      if (error) throw error;
+      toast({ title: "Payment deleted", description: `Ref ${p.message_reference} removed and audited.` });
+      setConfirmDelete(null);
+      setSelected(null);
+      await load();
+    } catch (e: any) {
+      toast({ title: "Delete failed", description: e.message, variant: "destructive" });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
 
   const load = async () => {
     setLoading(true);
@@ -285,8 +319,40 @@ export default function PaymentsTrace() {
               </div>
             </div>
           )}
+          {selected && isSuperAdmin && (
+            <DialogFooter>
+              <Button variant="destructive" size="sm" className="gap-2" onClick={() => setConfirmDelete(selected)}>
+                <Trash2 className="h-4 w-4" /> Delete payment record
+              </Button>
+            </DialogFooter>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!confirmDelete} onOpenChange={(o) => !o && setConfirmDelete(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-destructive">Permanently delete payment?</DialogTitle>
+            <DialogDescription>
+              This removes the payment trace record from the database. The action is audited and cannot be undone. Sales history is not affected.
+            </DialogDescription>
+          </DialogHeader>
+          {confirmDelete && (
+            <div className="text-xs font-mono bg-muted p-2 rounded space-y-1">
+              <div>Ref: {confirmDelete.message_reference}</div>
+              <div>Amount: {Number(confirmDelete.amount).toLocaleString()} KES</div>
+              <div>Status: {confirmDelete.status}</div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setConfirmDelete(null)} disabled={deleting}>Cancel</Button>
+            <Button variant="destructive" onClick={() => confirmDelete && deletePayment(confirmDelete)} disabled={deleting}>
+              {deleting ? "Deleting…" : "Yes, delete permanently"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </motion.div>
   );
 }
+

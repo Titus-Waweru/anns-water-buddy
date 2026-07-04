@@ -296,6 +296,45 @@ export type Database = {
           },
         ]
       }
+      payment_deletions_audit: {
+        Row: {
+          amount: number | null
+          correlation_id: string | null
+          deleted_at: string
+          deleted_by: string | null
+          id: string
+          message_reference: string | null
+          payment_id: string
+          sale_id: string | null
+          snapshot: Json | null
+          status: string | null
+        }
+        Insert: {
+          amount?: number | null
+          correlation_id?: string | null
+          deleted_at?: string
+          deleted_by?: string | null
+          id?: string
+          message_reference?: string | null
+          payment_id: string
+          sale_id?: string | null
+          snapshot?: Json | null
+          status?: string | null
+        }
+        Update: {
+          amount?: number | null
+          correlation_id?: string | null
+          deleted_at?: string
+          deleted_by?: string | null
+          id?: string
+          message_reference?: string | null
+          payment_id?: string
+          sale_id?: string | null
+          snapshot?: Json | null
+          status?: string | null
+        }
+        Relationships: []
+      }
       payments: {
         Row: {
           amount: number
