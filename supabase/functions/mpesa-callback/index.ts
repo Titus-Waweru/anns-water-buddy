@@ -98,15 +98,16 @@ Deno.serve(async (req) => {
 
 
     if (!payment) {
-      console.warn(`No payment row for MessageReference=${messageReference}`);
+      console.log(JSON.stringify({ evt: "callback_no_payment_row", message_reference: messageReference }));
       return ok();
     }
 
-    // Idempotency: don't downgrade a SUCCESS
-    if (payment.status === "SUCCESS") {
-      console.log("Payment already SUCCESS, ignoring duplicate callback");
+    // Idempotency: don't overwrite a terminal state
+    if (payment.status === "SUCCESS" || payment.status === "CANCELLED") {
+      console.log(JSON.stringify({ evt: "callback_duplicate_ignored", payment_id: payment.id, current_status: payment.status }));
       return ok();
     }
+
 
     const { error: upErr } = await admin
       .from("payments")
