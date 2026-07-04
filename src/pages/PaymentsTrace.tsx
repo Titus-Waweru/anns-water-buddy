@@ -54,7 +54,7 @@ function isUpstreamBlocked(p: Payment) {
 }
 
 export default function PaymentsTrace() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, isSuperAdmin, user } = useAuth();
   const { toast } = useToast();
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -62,6 +62,37 @@ export default function PaymentsTrace() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Payment | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Payment | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const deletePayment = async (p: Payment) => {
+    setDeleting(true);
+    try {
+      // Audit first (superadmin-only insert policy). If it fails, abort delete.
+      const { error: auditErr } = await supabase.from("payment_deletions_audit").insert({
+        payment_id: p.id,
+        message_reference: p.message_reference,
+        correlation_id: p.correlation_id,
+        sale_id: p.sale_id,
+        amount: p.amount,
+        status: p.status,
+        deleted_by: user?.id,
+        snapshot: p as any,
+      });
+      if (auditErr) throw auditErr;
+      const { error } = await supabase.from("payments").delete().eq("id", p.id);
+      if (error) throw error;
+      toast({ title: "Payment deleted", description: `Ref ${p.message_reference} removed and audited.` });
+      setConfirmDelete(null);
+      setSelected(null);
+      await load();
+    } catch (e: any) {
+      toast({ title: "Delete failed", description: e.message, variant: "destructive" });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
 
   const load = async () => {
     setLoading(true);
