@@ -139,7 +139,7 @@ Deno.serve(async (req) => {
       if (saleErr) console.error("Sale update error:", saleErr);
     }
 
-    console.log(`Callback processed: ref=${messageReference} status=${status}`);
+    console.log(JSON.stringify({ evt: "callback_processed", message_reference: messageReference, status, payment_id: payment.id }));
     return ok();
   } catch (err) {
     console.error("Callback fatal error:", err);
