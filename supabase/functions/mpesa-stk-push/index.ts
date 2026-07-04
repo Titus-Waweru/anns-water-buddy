@@ -439,10 +439,15 @@ Deno.serve(async (req) => {
     const coopPayload = {
       MessageReference: messageReference,
       CallBackUrl: callbackUrl,
+      callbackUrl: callbackUrl,
       AccountReference: sale_id.slice(0, 12),
+      accountReference: sale_id.slice(0, 12),
       Amount: Number(amount),
+      transactionAmount: Number(amount),
       MSISDN: normalizedPhone,
+      customerMobileNumber: normalizedPhone,
       Currency: "KES",
+      transactionCurrency: "KES",
       Narration: narration || `Sale ${sale_id.slice(0, 8)}`,
     };
 
