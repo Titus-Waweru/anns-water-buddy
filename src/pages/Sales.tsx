@@ -107,12 +107,15 @@ export default function Sales() {
     refetch();
   };
 
-  // ---- Poll for STK payment status ----
+  // ---- Poll for STK payment status (every 2.5s, timeout 2 min) ----
   useEffect(() => {
-    if (!stkPending) return;
-    let attempts = 0;
+    if (!stkPending || stkStatus !== "waiting") return;
+    setStkElapsed(Math.floor((Date.now() - stkPending.startedAt) / 1000));
+
     const tick = async () => {
-      attempts++;
+      const elapsedMs = Date.now() - stkPending.startedAt;
+      setStkElapsed(Math.floor(elapsedMs / 1000));
+
       const { data } = await supabase
         .from("payments")
         .select("status, result_description")
@@ -134,16 +137,32 @@ export default function Sales() {
         toast.error(data.result_description || "Payment failed");
         return;
       }
-      // Timeout after ~2 minutes
-      if (attempts > 40) {
+      if (data?.status === "CANCELLED") {
         if (pollRef.current) window.clearInterval(pollRef.current);
-        setStkStatus("failed");
+        setStkStatus("cancelled");
+        return;
+      }
+      // Automatic 2-minute timeout
+      if (elapsedMs > 120_000) {
+        if (pollRef.current) window.clearInterval(pollRef.current);
+        setStkStatus("timeout");
+        // Mark payment as TIMEOUT so the sale is not locked forever
+        await supabase
+          .from("payments")
+          .update({ status: "CANCELLED", result_code: "TIMEOUT", result_description: "No callback received within 2 minutes" })
+          .eq("message_reference", stkPending.messageRef)
+          .eq("status", "PENDING");
+        await supabase
+          .from("sales")
+          .update({ payment_status: "CANCELLED" })
+          .eq("id", stkPending.saleId)
+          .eq("payment_status", "PENDING");
         toast.error("Payment timed out. You can retry.");
       }
     };
-    pollRef.current = window.setInterval(tick, 3000);
+    pollRef.current = window.setInterval(tick, 2500);
     return () => { if (pollRef.current) window.clearInterval(pollRef.current); };
-  }, [stkPending]);
+  }, [stkPending, stkStatus]);
 
   const sendStkPush = async (saleId: string, phone: string, amount: number) => {
     setStkStatus("sending");
@@ -159,9 +178,8 @@ export default function Sales() {
           data.message || "Payment provider authorization pending. Please retry later.",
           { description: data.correlation_id ? `Ref: ${data.correlation_id}` : undefined },
         );
-        // Keep the sale + payment as PENDING so the cashier can retry.
         if (data.message_reference) {
-          setStkPending({ saleId, messageRef: data.message_reference });
+          setStkPending({ saleId, messageRef: data.message_reference, startedAt: Date.now() });
         }
         return;
       }
@@ -174,16 +192,38 @@ export default function Sales() {
         return;
       }
 
-      setStkPending({ saleId, messageRef: data.message_reference });
+      setStkPending({ saleId, messageRef: data.message_reference, startedAt: Date.now() });
       setStkStatus("waiting");
-      toast.success("STK push sent. Waiting for payment confirmation…");
+      toast.success("STK sent — waiting for customer to enter M-Pesa PIN…");
     } catch (e: any) {
-      // Never let an exception blank-screen the POS.
       console.error("sendStkPush error:", e);
       setStkStatus("failed");
       toast.error("Payment provider unreachable. Please retry later.");
     }
   };
+
+  const cancelStk = async () => {
+    if (!stkPending || isCancelling) return;
+    setIsCancelling(true);
+    try {
+      await supabase
+        .from("payments")
+        .update({ status: "CANCELLED", result_code: "CANCELLED", result_description: "Cancelled by operator" })
+        .eq("message_reference", stkPending.messageRef)
+        .eq("status", "PENDING");
+      await supabase
+        .from("sales")
+        .update({ payment_status: "CANCELLED" })
+        .eq("id", stkPending.saleId)
+        .eq("payment_status", "PENDING");
+      if (pollRef.current) window.clearInterval(pollRef.current);
+      setStkStatus("cancelled");
+      toast.info("STK cancelled. You can send a new request.");
+    } finally {
+      setIsCancelling(false);
+    }
+  };
+
 
   const retryStk = async () => {
     if (!stkPending) return;
