@@ -34,7 +34,9 @@ const STATUS_META: Record<string, { icon: any; cls: string }> = {
   PENDING: { icon: Clock, cls: "bg-yellow-500/10 text-yellow-600 border-yellow-500/30" },
   SUCCESS: { icon: CheckCircle2, cls: "bg-success/10 text-success border-success/30" },
   FAILED: { icon: XCircle, cls: "bg-destructive/10 text-destructive border-destructive/30" },
+  CANCELLED: { icon: XCircle, cls: "bg-muted text-muted-foreground border-muted-foreground/30" },
 };
+
 
 function StatusBadge({ status }: { status: string }) {
   const m = STATUS_META[status] || STATUS_META.PENDING;
