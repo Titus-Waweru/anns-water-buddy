@@ -7,10 +7,11 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { RefreshCw, Play, Search, Copy, AlertTriangle, CheckCircle2, Clock, XCircle } from "lucide-react";
+import { RefreshCw, Play, Search, Copy, AlertTriangle, CheckCircle2, Clock, XCircle, Trash2 } from "lucide-react";
+
 
 type Payment = {
   id: string;
