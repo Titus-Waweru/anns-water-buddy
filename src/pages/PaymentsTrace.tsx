@@ -319,8 +319,40 @@ export default function PaymentsTrace() {
               </div>
             </div>
           )}
+          {selected && isSuperAdmin && (
+            <DialogFooter>
+              <Button variant="destructive" size="sm" className="gap-2" onClick={() => setConfirmDelete(selected)}>
+                <Trash2 className="h-4 w-4" /> Delete payment record
+              </Button>
+            </DialogFooter>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!confirmDelete} onOpenChange={(o) => !o && setConfirmDelete(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-destructive">Permanently delete payment?</DialogTitle>
+            <DialogDescription>
+              This removes the payment trace record from the database. The action is audited and cannot be undone. Sales history is not affected.
+            </DialogDescription>
+          </DialogHeader>
+          {confirmDelete && (
+            <div className="text-xs font-mono bg-muted p-2 rounded space-y-1">
+              <div>Ref: {confirmDelete.message_reference}</div>
+              <div>Amount: {Number(confirmDelete.amount).toLocaleString()} KES</div>
+              <div>Status: {confirmDelete.status}</div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setConfirmDelete(null)} disabled={deleting}>Cancel</Button>
+            <Button variant="destructive" onClick={() => confirmDelete && deletePayment(confirmDelete)} disabled={deleting}>
+              {deleting ? "Deleting…" : "Yes, delete permanently"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </motion.div>
   );
 }
+
