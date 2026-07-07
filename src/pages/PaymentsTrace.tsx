@@ -354,11 +354,25 @@ export default function PaymentsTrace() {
               </div>
             </div>
           )}
-          {selected && isSuperAdmin && (
-            <DialogFooter>
-              <Button variant="destructive" size="sm" className="gap-2" onClick={() => setConfirmDelete(selected)}>
-                <Trash2 className="h-4 w-4" /> Delete payment record
-              </Button>
+          {selected && (
+            <DialogFooter className="flex-wrap gap-2">
+              {selected.status === "PENDING" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                  disabled={checkingRef === selected.message_reference}
+                  onClick={() => checkStatusNow(selected)}
+                >
+                  <Activity className={`h-4 w-4 ${checkingRef === selected.message_reference ? "animate-pulse" : ""}`} />
+                  Check Status Now
+                </Button>
+              )}
+              {isSuperAdmin && (
+                <Button variant="destructive" size="sm" className="gap-2" onClick={() => setConfirmDelete(selected)}>
+                  <Trash2 className="h-4 w-4" /> Delete payment record
+                </Button>
+              )}
             </DialogFooter>
           )}
         </DialogContent>
