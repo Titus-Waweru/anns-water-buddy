@@ -24,7 +24,8 @@ export default function Sales() {
   const [receiptData, setReceiptData] = useState<any>(null);
   const [mpesaPhone, setMpesaPhone] = useState("");
   const [stkPending, setStkPending] = useState<{ saleId: string; messageRef: string; startedAt: number } | null>(null);
-  const [stkStatus, setStkStatus] = useState<"idle" | "sending" | "waiting" | "failed" | "timeout" | "cancelled">("idle");
+  const [stkStatus, setStkStatus] = useState<"idle" | "sending" | "waiting" | "still_processing" | "failed" | "cancelled">("idle");
+  const [isCheckingNow, setIsCheckingNow] = useState(false);
   const [stkElapsed, setStkElapsed] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
@@ -107,7 +108,18 @@ export default function Sales() {
     refetch();
   };
 
-  // ---- Poll for STK payment status (every 2.5s, timeout 2 min) ----
+  // ---- Actively poll Co-op Transaction Status API every 3s ----
+  // Co-op does NOT send callbacks. We ask their status endpoint via the
+  // mpesa-transaction-status edge function. After 120s we stop auto-polling
+  // and switch to "still_processing" so the cashier can Refresh / Continue /
+  // Cancel — we NEVER auto-fail a payment.
+  const queryStatus = async (messageRef: string) => {
+    const { data } = await supabase.functions.invoke("mpesa-transaction-status", {
+      body: { message_reference: messageRef },
+    });
+    return data as { status?: string; result_description?: string } | null;
+  };
+
   useEffect(() => {
     if (!stkPending || stkStatus !== "waiting") return;
     setStkElapsed(Math.floor((Date.now() - stkPending.startedAt) / 1000));
@@ -116,11 +128,7 @@ export default function Sales() {
       const elapsedMs = Date.now() - stkPending.startedAt;
       setStkElapsed(Math.floor(elapsedMs / 1000));
 
-      const { data } = await supabase
-        .from("payments")
-        .select("status, result_description")
-        .eq("message_reference", stkPending.messageRef)
-        .maybeSingle();
+      const data = await queryStatus(stkPending.messageRef);
 
       if (data?.status === "SUCCESS") {
         if (pollRef.current) window.clearInterval(pollRef.current);
@@ -142,25 +150,13 @@ export default function Sales() {
         setStkStatus("cancelled");
         return;
       }
-      // Automatic 2-minute timeout
+      // After 120s, stop auto-polling but leave payment PENDING.
       if (elapsedMs > 120_000) {
         if (pollRef.current) window.clearInterval(pollRef.current);
-        setStkStatus("timeout");
-        // Mark payment as TIMEOUT so the sale is not locked forever
-        await supabase
-          .from("payments")
-          .update({ status: "CANCELLED", result_code: "TIMEOUT", result_description: "No callback received within 2 minutes" })
-          .eq("message_reference", stkPending.messageRef)
-          .eq("status", "PENDING");
-        await supabase
-          .from("sales")
-          .update({ payment_status: "CANCELLED" })
-          .eq("id", stkPending.saleId)
-          .eq("payment_status", "PENDING");
-        toast.error("Payment timed out. You can retry.");
+        setStkStatus("still_processing");
       }
     };
-    pollRef.current = window.setInterval(tick, 2500);
+    pollRef.current = window.setInterval(tick, 3000);
     return () => { if (pollRef.current) window.clearInterval(pollRef.current); };
   }, [stkPending, stkStatus]);
 
@@ -202,27 +198,21 @@ export default function Sales() {
     }
   };
 
+  // Cancel STK — stops UI polling only. Does NOT cancel the bank transaction;
+  // the payment stays PENDING and can be resolved later via Payments Trace
+  // or the reconcile job (which query Co-op's Transaction Status API).
   const cancelStk = async () => {
     if (!stkPending || isCancelling) return;
     setIsCancelling(true);
     try {
-      await supabase
-        .from("payments")
-        .update({ status: "CANCELLED", result_code: "CANCELLED", result_description: "Cancelled by operator" })
-        .eq("message_reference", stkPending.messageRef)
-        .eq("status", "PENDING");
-      await supabase
-        .from("sales")
-        .update({ payment_status: "CANCELLED" })
-        .eq("id", stkPending.saleId)
-        .eq("payment_status", "PENDING");
       if (pollRef.current) window.clearInterval(pollRef.current);
       setStkStatus("cancelled");
-      toast.info("STK cancelled. You can send a new request.");
+      toast.info("Stopped checking. The bank transaction was not cancelled — check Payments Trace to resolve it.");
     } finally {
       setIsCancelling(false);
     }
   };
+
 
 
   const retryStk = async () => {
@@ -351,7 +341,40 @@ export default function Sales() {
     setMpesaPhone("");
   };
 
-  const showRetry = stkPending && (stkStatus === "failed" || stkStatus === "timeout" || stkStatus === "cancelled");
+  const showRetry = stkPending && (stkStatus === "failed" || stkStatus === "cancelled");
+
+  // "Continue Checking" — restart the 3s poll from where we left off.
+  const continueChecking = () => {
+    if (!stkPending) return;
+    setStkPending({ ...stkPending, startedAt: Date.now() });
+    setStkStatus("waiting");
+  };
+
+  // "Refresh Status" — one-shot status query against Co-op.
+  const refreshStatusNow = async () => {
+    if (!stkPending || isCheckingNow) return;
+    setIsCheckingNow(true);
+    try {
+      const data = await queryStatus(stkPending.messageRef);
+      if (data?.status === "SUCCESS") {
+        toast.success("Payment confirmed!");
+        await finalizeSale(stkPending.saleId);
+        setStkPending(null);
+        setStkStatus("idle");
+        setOpen(false);
+      } else if (data?.status === "FAILED") {
+        setStkStatus("failed");
+        toast.error(data.result_description || "Payment failed");
+      } else if (data?.status === "CANCELLED") {
+        setStkStatus("cancelled");
+      } else {
+        toast.info("Payment is still being processed by the bank.");
+      }
+    } finally {
+      setIsCheckingNow(false);
+    }
+  };
+
 
   return (
     <div className="space-y-6">
@@ -402,11 +425,37 @@ export default function Sales() {
               </Card>
             )}
 
+            {stkPending && stkStatus === "still_processing" && (
+              <Card className="bg-yellow-500/5 border-yellow-500/30">
+                <CardContent className="p-4 text-center space-y-3">
+                  <p className="font-medium text-yellow-700 dark:text-yellow-500">
+                    Payment is still being processed.
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Co-op has not returned a final result yet. You can keep checking or cancel polling
+                    (this only stops the UI check — it does NOT cancel the customer's transaction).
+                  </p>
+                  <p className="text-[11px] text-muted-foreground font-mono">Ref: {stkPending.messageRef}</p>
+                  <div className="flex gap-2 justify-center flex-wrap">
+                    <Button size="sm" variant="outline" onClick={refreshStatusNow} disabled={isCheckingNow} className="gap-2">
+                      <RefreshCw className={`h-4 w-4 ${isCheckingNow ? "animate-spin" : ""}`} /> Refresh Status
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={continueChecking} className="gap-2">
+                      <Loader2 className="h-4 w-4" /> Continue Checking
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={cancelStk} disabled={isCancelling} className="gap-2">
+                      <X className="h-4 w-4" /> Cancel
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {showRetry && (
               <Card className="bg-destructive/5 border-destructive/30">
                 <CardContent className="p-4 text-center space-y-3">
                   <p className="font-medium text-destructive">
-                    {stkStatus === "timeout" ? "Payment timed out" : stkStatus === "cancelled" ? "STK cancelled" : "Payment not completed"}
+                    {stkStatus === "cancelled" ? "STK cancelled" : "Payment not completed"}
                   </p>
                   <div className="flex gap-2 justify-center">
                     <Button size="sm" variant="outline" onClick={retryStk} className="gap-2">

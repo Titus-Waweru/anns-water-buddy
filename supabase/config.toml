@@ -3,6 +3,9 @@ project_id = "ltsjhyqjtssroftxjvht"
 [functions.mpesa-reconcile]
 verify_jwt = false
 
+[functions.mpesa-transaction-status]
+verify_jwt = false
+
 [functions.mpesa-egress-check]
 verify_jwt = false
 

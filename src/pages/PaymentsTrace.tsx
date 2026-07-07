@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { RefreshCw, Play, Search, Copy, AlertTriangle, CheckCircle2, Clock, XCircle, Trash2 } from "lucide-react";
+import { RefreshCw, Play, Search, Copy, AlertTriangle, CheckCircle2, Clock, XCircle, Trash2, Activity } from "lucide-react";
 
 
 type Payment = {
@@ -66,6 +66,27 @@ export default function PaymentsTrace() {
   const [selected, setSelected] = useState<Payment | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Payment | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [checkingRef, setCheckingRef] = useState<string | null>(null);
+
+  const checkStatusNow = async (p: Payment) => {
+    setCheckingRef(p.message_reference);
+    try {
+      const { data, error } = await supabase.functions.invoke("mpesa-transaction-status", {
+        body: { message_reference: p.message_reference },
+      });
+      if (error) throw error;
+      toast({
+        title: `Status: ${data?.status ?? "unknown"}`,
+        description: data?.result_description || `Ref ${p.message_reference}`,
+      });
+      await load();
+    } catch (e: any) {
+      toast({ title: "Status check failed", description: e.message, variant: "destructive" });
+    } finally {
+      setCheckingRef(null);
+    }
+  };
+
 
   const deletePayment = async (p: Payment) => {
     setDeleting(true);
@@ -269,7 +290,21 @@ export default function PaymentsTrace() {
                       </span>
                     </TableCell>
                     <TableCell>
-                      <Button size="sm" variant="ghost" onClick={() => setSelected(p)}>Details</Button>
+                      <div className="flex gap-1">
+                        {p.status === "PENDING" && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="gap-1"
+                            disabled={checkingRef === p.message_reference}
+                            onClick={() => checkStatusNow(p)}
+                          >
+                            <Activity className={`h-3 w-3 ${checkingRef === p.message_reference ? "animate-pulse" : ""}`} />
+                            Check
+                          </Button>
+                        )}
+                        <Button size="sm" variant="ghost" onClick={() => setSelected(p)}>Details</Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -312,18 +347,32 @@ export default function PaymentsTrace() {
                 <pre className="p-3 rounded bg-muted text-[11px] overflow-auto max-h-48">{JSON.stringify(selected.raw_request, null, 2)}</pre>
               </div>
               <div>
-                <p className="text-xs text-muted-foreground mb-1">Callback / upstream response</p>
+                <p className="text-xs text-muted-foreground mb-1">Latest Transaction Status response</p>
                 <pre className="p-3 rounded bg-muted text-[11px] overflow-auto max-h-48">
-                  {selected.raw_payload ? JSON.stringify(selected.raw_payload, null, 2) : "No callback received yet."}
+                  {selected.raw_payload ? JSON.stringify(selected.raw_payload, null, 2) : "No status result yet. Click Check Status Now."}
                 </pre>
               </div>
             </div>
           )}
-          {selected && isSuperAdmin && (
-            <DialogFooter>
-              <Button variant="destructive" size="sm" className="gap-2" onClick={() => setConfirmDelete(selected)}>
-                <Trash2 className="h-4 w-4" /> Delete payment record
-              </Button>
+          {selected && (
+            <DialogFooter className="flex-wrap gap-2">
+              {selected.status === "PENDING" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                  disabled={checkingRef === selected.message_reference}
+                  onClick={() => checkStatusNow(selected)}
+                >
+                  <Activity className={`h-4 w-4 ${checkingRef === selected.message_reference ? "animate-pulse" : ""}`} />
+                  Check Status Now
+                </Button>
+              )}
+              {isSuperAdmin && (
+                <Button variant="destructive" size="sm" className="gap-2" onClick={() => setConfirmDelete(selected)}>
+                  <Trash2 className="h-4 w-4" /> Delete payment record
+                </Button>
+              )}
             </DialogFooter>
           )}
         </DialogContent>
