@@ -290,7 +290,21 @@ export default function PaymentsTrace() {
                       </span>
                     </TableCell>
                     <TableCell>
-                      <Button size="sm" variant="ghost" onClick={() => setSelected(p)}>Details</Button>
+                      <div className="flex gap-1">
+                        {p.status === "PENDING" && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="gap-1"
+                            disabled={checkingRef === p.message_reference}
+                            onClick={() => checkStatusNow(p)}
+                          >
+                            <Activity className={`h-3 w-3 ${checkingRef === p.message_reference ? "animate-pulse" : ""}`} />
+                            Check
+                          </Button>
+                        )}
+                        <Button size="sm" variant="ghost" onClick={() => setSelected(p)}>Details</Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
