@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { RefreshCw, Play, Search, Copy, AlertTriangle, CheckCircle2, Clock, XCircle, Trash2 } from "lucide-react";
+import { RefreshCw, Play, Search, Copy, AlertTriangle, CheckCircle2, Clock, XCircle, Trash2, Activity } from "lucide-react";
 
 
 type Payment = {
