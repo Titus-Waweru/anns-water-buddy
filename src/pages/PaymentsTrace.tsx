@@ -66,6 +66,27 @@ export default function PaymentsTrace() {
   const [selected, setSelected] = useState<Payment | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Payment | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [checkingRef, setCheckingRef] = useState<string | null>(null);
+
+  const checkStatusNow = async (p: Payment) => {
+    setCheckingRef(p.message_reference);
+    try {
+      const { data, error } = await supabase.functions.invoke("mpesa-transaction-status", {
+        body: { message_reference: p.message_reference },
+      });
+      if (error) throw error;
+      toast({
+        title: `Status: ${data?.status ?? "unknown"}`,
+        description: data?.result_description || `Ref ${p.message_reference}`,
+      });
+      await load();
+    } catch (e: any) {
+      toast({ title: "Status check failed", description: e.message, variant: "destructive" });
+    } finally {
+      setCheckingRef(null);
+    }
+  };
+
 
   const deletePayment = async (p: Payment) => {
     setDeleting(true);
