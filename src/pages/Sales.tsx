@@ -198,27 +198,21 @@ export default function Sales() {
     }
   };
 
+  // Cancel STK — stops UI polling only. Does NOT cancel the bank transaction;
+  // the payment stays PENDING and can be resolved later via Payments Trace
+  // or the reconcile job (which query Co-op's Transaction Status API).
   const cancelStk = async () => {
     if (!stkPending || isCancelling) return;
     setIsCancelling(true);
     try {
-      await supabase
-        .from("payments")
-        .update({ status: "CANCELLED", result_code: "CANCELLED", result_description: "Cancelled by operator" })
-        .eq("message_reference", stkPending.messageRef)
-        .eq("status", "PENDING");
-      await supabase
-        .from("sales")
-        .update({ payment_status: "CANCELLED" })
-        .eq("id", stkPending.saleId)
-        .eq("payment_status", "PENDING");
       if (pollRef.current) window.clearInterval(pollRef.current);
       setStkStatus("cancelled");
-      toast.info("STK cancelled. You can send a new request.");
+      toast.info("Stopped checking. The bank transaction was not cancelled — check Payments Trace to resolve it.");
     } finally {
       setIsCancelling(false);
     }
   };
+
 
 
   const retryStk = async () => {
