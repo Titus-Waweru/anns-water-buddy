@@ -431,11 +431,37 @@ export default function Sales() {
               </Card>
             )}
 
+            {stkPending && stkStatus === "still_processing" && (
+              <Card className="bg-yellow-500/5 border-yellow-500/30">
+                <CardContent className="p-4 text-center space-y-3">
+                  <p className="font-medium text-yellow-700 dark:text-yellow-500">
+                    Payment is still being processed.
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Co-op has not returned a final result yet. You can keep checking or cancel polling
+                    (this only stops the UI check — it does NOT cancel the customer's transaction).
+                  </p>
+                  <p className="text-[11px] text-muted-foreground font-mono">Ref: {stkPending.messageRef}</p>
+                  <div className="flex gap-2 justify-center flex-wrap">
+                    <Button size="sm" variant="outline" onClick={refreshStatusNow} disabled={isCheckingNow} className="gap-2">
+                      <RefreshCw className={`h-4 w-4 ${isCheckingNow ? "animate-spin" : ""}`} /> Refresh Status
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={continueChecking} className="gap-2">
+                      <Loader2 className="h-4 w-4" /> Continue Checking
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={cancelStk} disabled={isCancelling} className="gap-2">
+                      <X className="h-4 w-4" /> Cancel
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {showRetry && (
               <Card className="bg-destructive/5 border-destructive/30">
                 <CardContent className="p-4 text-center space-y-3">
                   <p className="font-medium text-destructive">
-                    {stkStatus === "timeout" ? "Payment timed out" : stkStatus === "cancelled" ? "STK cancelled" : "Payment not completed"}
+                    {stkStatus === "cancelled" ? "STK cancelled" : "Payment not completed"}
                   </p>
                   <div className="flex gap-2 justify-center">
                     <Button size="sm" variant="outline" onClick={retryStk} className="gap-2">
