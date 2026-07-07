@@ -347,7 +347,40 @@ export default function Sales() {
     setMpesaPhone("");
   };
 
-  const showRetry = stkPending && (stkStatus === "failed" || stkStatus === "timeout" || stkStatus === "cancelled");
+  const showRetry = stkPending && (stkStatus === "failed" || stkStatus === "cancelled");
+
+  // "Continue Checking" — restart the 3s poll from where we left off.
+  const continueChecking = () => {
+    if (!stkPending) return;
+    setStkPending({ ...stkPending, startedAt: Date.now() });
+    setStkStatus("waiting");
+  };
+
+  // "Refresh Status" — one-shot status query against Co-op.
+  const refreshStatusNow = async () => {
+    if (!stkPending || isCheckingNow) return;
+    setIsCheckingNow(true);
+    try {
+      const data = await queryStatus(stkPending.messageRef);
+      if (data?.status === "SUCCESS") {
+        toast.success("Payment confirmed!");
+        await finalizeSale(stkPending.saleId);
+        setStkPending(null);
+        setStkStatus("idle");
+        setOpen(false);
+      } else if (data?.status === "FAILED") {
+        setStkStatus("failed");
+        toast.error(data.result_description || "Payment failed");
+      } else if (data?.status === "CANCELLED") {
+        setStkStatus("cancelled");
+      } else {
+        toast.info("Payment is still being processed by the bank.");
+      }
+    } finally {
+      setIsCheckingNow(false);
+    }
+  };
+
 
   return (
     <div className="space-y-6">
