@@ -347,9 +347,9 @@ export default function PaymentsTrace() {
                 <pre className="p-3 rounded bg-muted text-[11px] overflow-auto max-h-48">{JSON.stringify(selected.raw_request, null, 2)}</pre>
               </div>
               <div>
-                <p className="text-xs text-muted-foreground mb-1">Callback / upstream response</p>
+                <p className="text-xs text-muted-foreground mb-1">Latest Transaction Status response</p>
                 <pre className="p-3 rounded bg-muted text-[11px] overflow-auto max-h-48">
-                  {selected.raw_payload ? JSON.stringify(selected.raw_payload, null, 2) : "No callback received yet."}
+                  {selected.raw_payload ? JSON.stringify(selected.raw_payload, null, 2) : "No status result yet. Click Check Status Now."}
                 </pre>
               </div>
             </div>
