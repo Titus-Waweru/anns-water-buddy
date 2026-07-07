@@ -24,7 +24,8 @@ export default function Sales() {
   const [receiptData, setReceiptData] = useState<any>(null);
   const [mpesaPhone, setMpesaPhone] = useState("");
   const [stkPending, setStkPending] = useState<{ saleId: string; messageRef: string; startedAt: number } | null>(null);
-  const [stkStatus, setStkStatus] = useState<"idle" | "sending" | "waiting" | "failed" | "timeout" | "cancelled">("idle");
+  const [stkStatus, setStkStatus] = useState<"idle" | "sending" | "waiting" | "still_processing" | "failed" | "cancelled">("idle");
+  const [isCheckingNow, setIsCheckingNow] = useState(false);
   const [stkElapsed, setStkElapsed] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
