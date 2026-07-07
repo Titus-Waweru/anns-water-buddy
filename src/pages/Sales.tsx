@@ -108,7 +108,18 @@ export default function Sales() {
     refetch();
   };
 
-  // ---- Poll for STK payment status (every 2.5s, timeout 2 min) ----
+  // ---- Actively poll Co-op Transaction Status API every 3s ----
+  // Co-op does NOT send callbacks. We ask their status endpoint via the
+  // mpesa-transaction-status edge function. After 120s we stop auto-polling
+  // and switch to "still_processing" so the cashier can Refresh / Continue /
+  // Cancel — we NEVER auto-fail a payment.
+  const queryStatus = async (messageRef: string) => {
+    const { data } = await supabase.functions.invoke("mpesa-transaction-status", {
+      body: { message_reference: messageRef },
+    });
+    return data as { status?: string; result_description?: string } | null;
+  };
+
   useEffect(() => {
     if (!stkPending || stkStatus !== "waiting") return;
     setStkElapsed(Math.floor((Date.now() - stkPending.startedAt) / 1000));
@@ -117,11 +128,7 @@ export default function Sales() {
       const elapsedMs = Date.now() - stkPending.startedAt;
       setStkElapsed(Math.floor(elapsedMs / 1000));
 
-      const { data } = await supabase
-        .from("payments")
-        .select("status, result_description")
-        .eq("message_reference", stkPending.messageRef)
-        .maybeSingle();
+      const data = await queryStatus(stkPending.messageRef);
 
       if (data?.status === "SUCCESS") {
         if (pollRef.current) window.clearInterval(pollRef.current);
@@ -143,25 +150,13 @@ export default function Sales() {
         setStkStatus("cancelled");
         return;
       }
-      // Automatic 2-minute timeout
+      // After 120s, stop auto-polling but leave payment PENDING.
       if (elapsedMs > 120_000) {
         if (pollRef.current) window.clearInterval(pollRef.current);
-        setStkStatus("timeout");
-        // Mark payment as TIMEOUT so the sale is not locked forever
-        await supabase
-          .from("payments")
-          .update({ status: "CANCELLED", result_code: "TIMEOUT", result_description: "No callback received within 2 minutes" })
-          .eq("message_reference", stkPending.messageRef)
-          .eq("status", "PENDING");
-        await supabase
-          .from("sales")
-          .update({ payment_status: "CANCELLED" })
-          .eq("id", stkPending.saleId)
-          .eq("payment_status", "PENDING");
-        toast.error("Payment timed out. You can retry.");
+        setStkStatus("still_processing");
       }
     };
-    pollRef.current = window.setInterval(tick, 2500);
+    pollRef.current = window.setInterval(tick, 3000);
     return () => { if (pollRef.current) window.clearInterval(pollRef.current); };
   }, [stkPending, stkStatus]);
 
