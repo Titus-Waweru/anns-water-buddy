@@ -341,11 +341,17 @@ export type Database = {
           branch_id: string | null
           correlation_id: string | null
           created_at: string
+          entered_by: string | null
           id: string
           initiated_by: string | null
           message_reference: string
+          mpesa_receipt: string | null
           narration: string | null
+          notes: string | null
           operator_code: string | null
+          payment_method: string | null
+          payment_source: string | null
+          payment_time: string | null
           phone_number: string
           provider: string
           raw_payload: Json | null
@@ -363,11 +369,17 @@ export type Database = {
           branch_id?: string | null
           correlation_id?: string | null
           created_at?: string
+          entered_by?: string | null
           id?: string
           initiated_by?: string | null
           message_reference: string
+          mpesa_receipt?: string | null
           narration?: string | null
+          notes?: string | null
           operator_code?: string | null
+          payment_method?: string | null
+          payment_source?: string | null
+          payment_time?: string | null
           phone_number: string
           provider?: string
           raw_payload?: Json | null
@@ -385,11 +397,17 @@ export type Database = {
           branch_id?: string | null
           correlation_id?: string | null
           created_at?: string
+          entered_by?: string | null
           id?: string
           initiated_by?: string | null
           message_reference?: string
+          mpesa_receipt?: string | null
           narration?: string | null
+          notes?: string | null
           operator_code?: string | null
+          payment_method?: string | null
+          payment_source?: string | null
+          payment_time?: string | null
           phone_number?: string
           provider?: string
           raw_payload?: Json | null
