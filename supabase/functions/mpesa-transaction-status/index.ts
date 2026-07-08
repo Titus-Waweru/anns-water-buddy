@@ -141,8 +141,11 @@ function parseCoopConfig(): CoopConfig {
   const resolveVars = (s: string) =>
     s.replace(/\{\{(\w+)\}\}/g, (_, k) => collectionVars[String(k).toLowerCase()] ?? "");
   tokenUrl = resolveVars(tokenUrl) || "https://openapi.co-opbank.co.ke/token";
-  statusUrl = resolveVars(statusUrl) ||
-    (Deno.env.get("COOP_STATUS_URL") || "https://openapi.co-opbank.co.ke/FT/stk/1.0.0/status");
+  // Co-op confirmed Transaction Status endpoint: /Enquiry/STK/1.0.0
+  // Override with COOP_STATUS_URL only if the bank changes the path.
+  statusUrl =
+    Deno.env.get("COOP_STATUS_URL") ||
+    "https://openapi.co-opbank.co.ke/Enquiry/STK/1.0.0";
 
   const proxyBase = (Deno.env.get("COOP_PROXY_BASE_URL") || "").replace(/\/+$/, "");
   if (proxyBase) {
