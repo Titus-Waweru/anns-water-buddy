@@ -29,6 +29,16 @@ export default function Sales() {
   const [stkElapsed, setStkElapsed] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [manualMode, setManualMode] = useState(false);
+  const [manualSubmitting, setManualSubmitting] = useState(false);
+  const [manualForm, setManualForm] = useState({
+    customerName: "",
+    phone: "",
+    amount: 0,
+    mpesaCode: "",
+    paymentTime: new Date().toISOString().slice(0, 16),
+    notes: "",
+  });
   const idempotencyKeyRef = useRef<string | null>(null);
   const pollRef = useRef<number | null>(null);
   const clockRef = useRef<number | null>(null);
@@ -336,6 +346,7 @@ export default function Sales() {
     setOpen(false);
     setStkPending(null);
     setStkStatus("idle");
+    setManualMode(false);
     idempotencyKeyRef.current = null;
     setForm({ customerId: "", productId: "", quantity: 1, discountType: "fixed", discountValue: 0, paymentMode: "Cash" });
     setMpesaPhone("");
@@ -375,6 +386,109 @@ export default function Sales() {
     }
   };
 
+  // ---- Manual M-Pesa fallback ----
+  // Opens a form so the cashier can record the M-Pesa payment from the
+  // customer's SMS confirmation when STK Push is unavailable.
+  const openManualMode = () => {
+    if (pollRef.current) window.clearInterval(pollRef.current);
+    setStkStatus("idle");
+    setManualForm({
+      customerName: selectedCustomer?.name || "Walk-in",
+      phone: mpesaPhone || "",
+      amount: finalAmount || Number(stkPending ? 0 : 0),
+      mpesaCode: "",
+      paymentTime: new Date().toISOString().slice(0, 16),
+      notes: "",
+    });
+    setManualMode(true);
+  };
+
+  const submitManualPayment = async () => {
+    if (!stkPending) {
+      toast.error("No sale is awaiting payment.");
+      return;
+    }
+    const code = manualForm.mpesaCode.trim().toUpperCase();
+    // M-Pesa transaction codes are 10 alphanumeric chars (e.g. SFE1A2B3C4)
+    if (!/^[A-Z0-9]{10}$/.test(code)) {
+      toast.error("Enter a valid 10-character M-Pesa transaction code.");
+      return;
+    }
+    if (!manualForm.phone.trim() || !manualForm.amount || manualForm.amount <= 0) {
+      toast.error("Phone number and amount are required.");
+      return;
+    }
+    setManualSubmitting(true);
+    try {
+      const paymentTimeIso = new Date(manualForm.paymentTime).toISOString();
+      // Update existing PENDING payment row created during STK attempt.
+      const { data: existing } = await supabase
+        .from("payments")
+        .select("id")
+        .eq("message_reference", stkPending.messageRef)
+        .maybeSingle();
+
+      const payload: any = {
+        status: "SUCCESS",
+        payment_method: "MPESA_MANUAL",
+        payment_source: "Manual Entry",
+        mpesa_receipt: code,
+        payment_time: paymentTimeIso,
+        transaction_date: paymentTimeIso,
+        phone_number: manualForm.phone.trim(),
+        amount: Number(manualForm.amount),
+        notes: manualForm.notes || null,
+        entered_by: user?.id || null,
+        result_code: "0",
+        result_description: "Manual M-Pesa entry",
+        updated_at: new Date().toISOString(),
+      };
+
+      let dbError: any = null;
+      if (existing) {
+        const { error } = await supabase.from("payments").update(payload).eq("id", existing.id);
+        dbError = error;
+      } else {
+        const { error } = await supabase.from("payments").insert({
+          provider: "coop",
+          sale_id: stkPending.saleId,
+          message_reference: stkPending.messageRef,
+          transaction_currency: "KES",
+          initiated_by: user?.id || null,
+          branch_id: effectiveBranchId,
+          narration: `Manual M-Pesa ${code}`,
+          ...payload,
+        });
+        dbError = error;
+      }
+
+      if (dbError) {
+        if ((dbError as any).code === "23505") {
+          toast.error("That M-Pesa transaction code has already been recorded.");
+        } else {
+          toast.error(dbError.message || "Could not save manual payment.");
+        }
+        return;
+      }
+
+      // Mark sale as PAID so it appears in reports exactly like an STK payment.
+      await supabase
+        .from("sales")
+        .update({ payment_status: "PAID" })
+        .eq("id", stkPending.saleId);
+
+      toast.success("Manual M-Pesa payment recorded.");
+      await finalizeSale(stkPending.saleId);
+      setManualMode(false);
+      setStkPending(null);
+      setStkStatus("idle");
+      setOpen(false);
+    } finally {
+      setManualSubmitting(false);
+    }
+  };
+
+
 
   return (
     <div className="space-y-6">
@@ -390,8 +504,65 @@ export default function Sales() {
           <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
             <DialogHeader><DialogTitle>Record Sale</DialogTitle></DialogHeader>
 
+            {/* Manual M-Pesa entry (fallback when STK Push is unavailable) */}
+            {manualMode && stkPending && (
+              <Card className="bg-blue-500/5 border-blue-500/30">
+                <CardContent className="p-4 space-y-3">
+                  <div>
+                    <p className="font-semibold text-blue-700 dark:text-blue-400">Manual M-Pesa entry</p>
+                    <p className="text-xs text-muted-foreground">
+                      Automatic STK Push is unavailable. Ask the customer to pay via M-Pesa and
+                      record the transaction code from their SMS below.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="col-span-2">
+                      <Label>Customer Name</Label>
+                      <Input value={manualForm.customerName} onChange={e => setManualForm({ ...manualForm, customerName: e.target.value })} />
+                    </div>
+                    <div>
+                      <Label>Phone Number *</Label>
+                      <Input value={manualForm.phone} onChange={e => setManualForm({ ...manualForm, phone: e.target.value })} placeholder="0712345678" />
+                    </div>
+                    <div>
+                      <Label>Amount (KSh) *</Label>
+                      <Input type="number" min={1} value={manualForm.amount || ""} onChange={e => setManualForm({ ...manualForm, amount: Number(e.target.value) })} />
+                    </div>
+                    <div className="col-span-2">
+                      <Label>M-Pesa Transaction Code *</Label>
+                      <Input
+                        value={manualForm.mpesaCode}
+                        onChange={e => setManualForm({ ...manualForm, mpesaCode: e.target.value.toUpperCase() })}
+                        placeholder="e.g. SFE1A2B3C4"
+                        maxLength={10}
+                        className="font-mono"
+                      />
+                      <p className="text-[11px] text-muted-foreground mt-1">10 letters and digits from the M-Pesa SMS.</p>
+                    </div>
+                    <div className="col-span-2">
+                      <Label>Payment Time</Label>
+                      <Input type="datetime-local" value={manualForm.paymentTime} onChange={e => setManualForm({ ...manualForm, paymentTime: e.target.value })} />
+                    </div>
+                    <div className="col-span-2">
+                      <Label>Notes (optional)</Label>
+                      <Input value={manualForm.notes} onChange={e => setManualForm({ ...manualForm, notes: e.target.value })} placeholder="Any extra info" />
+                    </div>
+                  </div>
+                  <div className="flex gap-2 pt-1">
+                    <Button size="sm" className="flex-1 gap-2" onClick={submitManualPayment} disabled={manualSubmitting}>
+                      {manualSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
+                      Save Manual Payment
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setManualMode(false)} disabled={manualSubmitting}>
+                      Back
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {/* STK in progress overlay */}
-            {stkPending && (stkStatus === "waiting" || stkStatus === "sending") && (
+            {!manualMode && stkPending && (stkStatus === "waiting" || stkStatus === "sending") && (
               <Card className="bg-primary/5 border-primary/20">
                 <CardContent className="p-4 space-y-3">
                   <div className="text-center space-y-1">
@@ -412,28 +583,27 @@ export default function Sales() {
                       Ref: {stkPending.messageRef} · {stkElapsed}s elapsed
                     </p>
                   </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="w-full gap-2"
-                    onClick={cancelStk}
-                    disabled={isCancelling}
-                  >
-                    <X className="h-4 w-4" /> {isCancelling ? "Cancelling…" : "Cancel STK"}
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline" className="flex-1 gap-2" onClick={cancelStk} disabled={isCancelling}>
+                      <X className="h-4 w-4" /> {isCancelling ? "Cancelling…" : "Cancel STK"}
+                    </Button>
+                    <Button size="sm" variant="secondary" className="flex-1 gap-2" onClick={openManualMode}>
+                      <Smartphone className="h-4 w-4" /> Enter M-Pesa manually
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             )}
 
-            {stkPending && stkStatus === "still_processing" && (
+            {!manualMode && stkPending && stkStatus === "still_processing" && (
               <Card className="bg-yellow-500/5 border-yellow-500/30">
                 <CardContent className="p-4 text-center space-y-3">
                   <p className="font-medium text-yellow-700 dark:text-yellow-500">
                     Payment is still being processed.
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    Co-op has not returned a final result yet. You can keep checking or cancel polling
-                    (this only stops the UI check — it does NOT cancel the customer's transaction).
+                    Co-op has not returned a final result yet. You can keep checking, cancel polling,
+                    or record the M-Pesa payment manually from the customer's SMS.
                   </p>
                   <p className="text-[11px] text-muted-foreground font-mono">Ref: {stkPending.messageRef}</p>
                   <div className="flex gap-2 justify-center flex-wrap">
@@ -443,6 +613,9 @@ export default function Sales() {
                     <Button size="sm" variant="outline" onClick={continueChecking} className="gap-2">
                       <Loader2 className="h-4 w-4" /> Continue Checking
                     </Button>
+                    <Button size="sm" variant="secondary" onClick={openManualMode} className="gap-2">
+                      <Smartphone className="h-4 w-4" /> Enter M-Pesa manually
+                    </Button>
                     <Button size="sm" variant="ghost" onClick={cancelStk} disabled={isCancelling} className="gap-2">
                       <X className="h-4 w-4" /> Cancel
                     </Button>
@@ -451,15 +624,22 @@ export default function Sales() {
               </Card>
             )}
 
-            {showRetry && (
+            {!manualMode && showRetry && (
               <Card className="bg-destructive/5 border-destructive/30">
                 <CardContent className="p-4 text-center space-y-3">
                   <p className="font-medium text-destructive">
-                    {stkStatus === "cancelled" ? "STK cancelled" : "Payment not completed"}
+                    {stkStatus === "cancelled" ? "STK cancelled" : "Automatic STK Push failed"}
                   </p>
-                  <div className="flex gap-2 justify-center">
+                  <p className="text-xs text-muted-foreground">
+                    You can retry the STK Push, record the M-Pesa payment manually, or close.
+                    The sale is preserved either way.
+                  </p>
+                  <div className="flex gap-2 justify-center flex-wrap">
                     <Button size="sm" variant="outline" onClick={retryStk} className="gap-2">
                       <RefreshCw className="h-4 w-4" /> Retry STK Push
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={openManualMode} className="gap-2">
+                      <Smartphone className="h-4 w-4" /> Enter M-Pesa manually
                     </Button>
                     <Button size="sm" variant="ghost" onClick={closeDialog}>Close</Button>
                   </div>
@@ -467,7 +647,8 @@ export default function Sales() {
               </Card>
             )}
 
-            {!stkPending && (
+            {!stkPending && !manualMode && (
+
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
