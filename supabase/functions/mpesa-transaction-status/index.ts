@@ -141,8 +141,11 @@ function parseCoopConfig(): CoopConfig {
   const resolveVars = (s: string) =>
     s.replace(/\{\{(\w+)\}\}/g, (_, k) => collectionVars[String(k).toLowerCase()] ?? "");
   tokenUrl = resolveVars(tokenUrl) || "https://openapi.co-opbank.co.ke/token";
-  statusUrl = resolveVars(statusUrl) ||
-    (Deno.env.get("COOP_STATUS_URL") || "https://openapi.co-opbank.co.ke/FT/stk/1.0.0/status");
+  // Co-op confirmed Transaction Status endpoint: /Enquiry/STK/1.0.0
+  // Override with COOP_STATUS_URL only if the bank changes the path.
+  statusUrl =
+    Deno.env.get("COOP_STATUS_URL") ||
+    "https://openapi.co-opbank.co.ke/Enquiry/STK/1.0.0";
 
   const proxyBase = (Deno.env.get("COOP_PROXY_BASE_URL") || "").replace(/\/+$/, "");
   if (proxyBase) {
@@ -232,6 +235,12 @@ Deno.serve(async (req) => {
         { status: 400, headers: respHeaders });
     }
 
+    console.log(JSON.stringify({
+      evt: "transaction_status_start",
+      correlationId,
+      message_reference: messageReference,
+    }));
+
     const admin = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
@@ -244,12 +253,20 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     if (!payment) {
+      console.warn(JSON.stringify({
+        evt: "transaction_status_no_payment",
+        correlationId, message_reference: messageReference,
+      }));
       return new Response(JSON.stringify({ ok: false, error: "payment not found" }),
         { status: 404, headers: respHeaders });
     }
 
     // Terminal states — return current status without hitting Co-op again.
     if (payment.status === "SUCCESS" || payment.status === "FAILED" || payment.status === "CANCELLED") {
+      console.log(JSON.stringify({
+        evt: "transaction_status_terminal_skip",
+        correlationId, message_reference: messageReference, status: payment.status,
+      }));
       return new Response(JSON.stringify({
         ok: true, status: payment.status, terminal: true, message_reference: messageReference,
       }), { status: 200, headers: respHeaders });
@@ -257,13 +274,26 @@ Deno.serve(async (req) => {
 
     const cfg = parseCoopConfig();
     const token = await getToken(cfg, correlationId);
+    console.log(JSON.stringify({
+      evt: "transaction_status_token_success",
+      correlationId,
+      message_reference: messageReference,
+      token_len: token.length,
+    }));
 
     // Co-op status query payload — MessageReference is the required lookup key.
-    // MessageDateTime keeps parity with STK request format.
     const statusPayload = {
       MessageReference: messageReference,
       MessageDateTime: new Date().toISOString(),
     };
+
+    console.log(JSON.stringify({
+      evt: "transaction_status_request",
+      correlationId,
+      message_reference: messageReference,
+      url: cfg.statusUrl,
+      payload: statusPayload,
+    }));
 
     const t0 = Date.now();
     const res = await fetch(cfg.statusUrl, {
@@ -285,12 +315,12 @@ Deno.serve(async (req) => {
     try { data = JSON.parse(text); } catch { /* html/error */ }
 
     console.log(JSON.stringify({
-      evt: "coop_tx_status",
+      evt: "transaction_status_response",
       correlationId,
       message_reference: messageReference,
-      status_code: res.status,
+      upstream_status: res.status,
       duration_ms: Date.now() - t0,
-      response: data && Object.keys(data).length ? data : text.slice(0, 400),
+      response: data && Object.keys(data).length ? data : text.slice(0, 800),
     }));
 
     // Upstream error: keep PENDING, surface message to caller so UI shows retry.
@@ -327,6 +357,18 @@ Deno.serve(async (req) => {
     } else if ((status === "FAILED" || status === "CANCELLED") && payment.sale_id) {
       await admin.from("sales").update({ payment_status: status }).eq("id", payment.sale_id);
     }
+
+    console.log(JSON.stringify({
+      evt: "transaction_status_db_update",
+      correlationId,
+      message_reference: messageReference,
+      payment_id: payment.id,
+      sale_id: payment.sale_id,
+      new_status: status,
+      result_code: code,
+      result_description: desc,
+      receipt,
+    }));
 
     return new Response(JSON.stringify({
       ok: true,

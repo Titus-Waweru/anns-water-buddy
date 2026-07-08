@@ -63,6 +63,13 @@ Deno.serve(async (req) => {
 
     for (const p of pending || []) {
       try {
+        console.log(JSON.stringify({
+          evt: "reconcile_invoke_status",
+          correlationId,
+          payment_id: p.id,
+          message_reference: p.message_reference,
+          url: statusUrl,
+        }));
         const res = await fetch(statusUrl, {
           method: "POST",
           headers: {
@@ -74,6 +81,17 @@ Deno.serve(async (req) => {
           body: JSON.stringify({ message_reference: p.message_reference }),
         });
         const data = await res.json().catch(() => ({} as any));
+        console.log(JSON.stringify({
+          evt: "reconcile_status_result",
+          correlationId,
+          payment_id: p.id,
+          message_reference: p.message_reference,
+          http_status: res.status,
+          returned_status: data?.status,
+          upstream_status: data?.upstream_status,
+          result_code: data?.result_code,
+          result_description: data?.result_description,
+        }));
         const status = data?.status || "PENDING";
         if (status === "SUCCESS") summary.finalized_success++;
         else if (status === "FAILED") summary.finalized_failed++;
