@@ -385,6 +385,109 @@ export default function Sales() {
     }
   };
 
+  // ---- Manual M-Pesa fallback ----
+  // Opens a form so the cashier can record the M-Pesa payment from the
+  // customer's SMS confirmation when STK Push is unavailable.
+  const openManualMode = () => {
+    if (pollRef.current) window.clearInterval(pollRef.current);
+    setStkStatus("idle");
+    setManualForm({
+      customerName: selectedCustomer?.name || "Walk-in",
+      phone: mpesaPhone || "",
+      amount: finalAmount || Number(stkPending ? 0 : 0),
+      mpesaCode: "",
+      paymentTime: new Date().toISOString().slice(0, 16),
+      notes: "",
+    });
+    setManualMode(true);
+  };
+
+  const submitManualPayment = async () => {
+    if (!stkPending) {
+      toast.error("No sale is awaiting payment.");
+      return;
+    }
+    const code = manualForm.mpesaCode.trim().toUpperCase();
+    // M-Pesa transaction codes are 10 alphanumeric chars (e.g. SFE1A2B3C4)
+    if (!/^[A-Z0-9]{10}$/.test(code)) {
+      toast.error("Enter a valid 10-character M-Pesa transaction code.");
+      return;
+    }
+    if (!manualForm.phone.trim() || !manualForm.amount || manualForm.amount <= 0) {
+      toast.error("Phone number and amount are required.");
+      return;
+    }
+    setManualSubmitting(true);
+    try {
+      const paymentTimeIso = new Date(manualForm.paymentTime).toISOString();
+      // Update existing PENDING payment row created during STK attempt.
+      const { data: existing } = await supabase
+        .from("payments")
+        .select("id")
+        .eq("message_reference", stkPending.messageRef)
+        .maybeSingle();
+
+      const payload: any = {
+        status: "SUCCESS",
+        payment_method: "MPESA_MANUAL",
+        payment_source: "Manual Entry",
+        mpesa_receipt: code,
+        payment_time: paymentTimeIso,
+        transaction_date: paymentTimeIso,
+        phone_number: manualForm.phone.trim(),
+        amount: Number(manualForm.amount),
+        notes: manualForm.notes || null,
+        entered_by: user?.id || null,
+        result_code: "0",
+        result_description: "Manual M-Pesa entry",
+        updated_at: new Date().toISOString(),
+      };
+
+      let dbError: any = null;
+      if (existing) {
+        const { error } = await supabase.from("payments").update(payload).eq("id", existing.id);
+        dbError = error;
+      } else {
+        const { error } = await supabase.from("payments").insert({
+          provider: "coop",
+          sale_id: stkPending.saleId,
+          message_reference: stkPending.messageRef,
+          transaction_currency: "KES",
+          initiated_by: user?.id || null,
+          branch_id: effectiveBranchId,
+          narration: `Manual M-Pesa ${code}`,
+          ...payload,
+        });
+        dbError = error;
+      }
+
+      if (dbError) {
+        if ((dbError as any).code === "23505") {
+          toast.error("That M-Pesa transaction code has already been recorded.");
+        } else {
+          toast.error(dbError.message || "Could not save manual payment.");
+        }
+        return;
+      }
+
+      // Mark sale as PAID so it appears in reports exactly like an STK payment.
+      await supabase
+        .from("sales")
+        .update({ payment_status: "PAID" })
+        .eq("id", stkPending.saleId);
+
+      toast.success("Manual M-Pesa payment recorded.");
+      await finalizeSale(stkPending.saleId);
+      setManualMode(false);
+      setStkPending(null);
+      setStkStatus("idle");
+      setOpen(false);
+    } finally {
+      setManualSubmitting(false);
+    }
+  };
+
+
 
   return (
     <div className="space-y-6">
