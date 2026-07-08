@@ -503,8 +503,65 @@ export default function Sales() {
           <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
             <DialogHeader><DialogTitle>Record Sale</DialogTitle></DialogHeader>
 
+            {/* Manual M-Pesa entry (fallback when STK Push is unavailable) */}
+            {manualMode && stkPending && (
+              <Card className="bg-blue-500/5 border-blue-500/30">
+                <CardContent className="p-4 space-y-3">
+                  <div>
+                    <p className="font-semibold text-blue-700 dark:text-blue-400">Manual M-Pesa entry</p>
+                    <p className="text-xs text-muted-foreground">
+                      Automatic STK Push is unavailable. Ask the customer to pay via M-Pesa and
+                      record the transaction code from their SMS below.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="col-span-2">
+                      <Label>Customer Name</Label>
+                      <Input value={manualForm.customerName} onChange={e => setManualForm({ ...manualForm, customerName: e.target.value })} />
+                    </div>
+                    <div>
+                      <Label>Phone Number *</Label>
+                      <Input value={manualForm.phone} onChange={e => setManualForm({ ...manualForm, phone: e.target.value })} placeholder="0712345678" />
+                    </div>
+                    <div>
+                      <Label>Amount (KSh) *</Label>
+                      <Input type="number" min={1} value={manualForm.amount || ""} onChange={e => setManualForm({ ...manualForm, amount: Number(e.target.value) })} />
+                    </div>
+                    <div className="col-span-2">
+                      <Label>M-Pesa Transaction Code *</Label>
+                      <Input
+                        value={manualForm.mpesaCode}
+                        onChange={e => setManualForm({ ...manualForm, mpesaCode: e.target.value.toUpperCase() })}
+                        placeholder="e.g. SFE1A2B3C4"
+                        maxLength={10}
+                        className="font-mono"
+                      />
+                      <p className="text-[11px] text-muted-foreground mt-1">10 letters and digits from the M-Pesa SMS.</p>
+                    </div>
+                    <div className="col-span-2">
+                      <Label>Payment Time</Label>
+                      <Input type="datetime-local" value={manualForm.paymentTime} onChange={e => setManualForm({ ...manualForm, paymentTime: e.target.value })} />
+                    </div>
+                    <div className="col-span-2">
+                      <Label>Notes (optional)</Label>
+                      <Input value={manualForm.notes} onChange={e => setManualForm({ ...manualForm, notes: e.target.value })} placeholder="Any extra info" />
+                    </div>
+                  </div>
+                  <div className="flex gap-2 pt-1">
+                    <Button size="sm" className="flex-1 gap-2" onClick={submitManualPayment} disabled={manualSubmitting}>
+                      {manualSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
+                      Save Manual Payment
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setManualMode(false)} disabled={manualSubmitting}>
+                      Back
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {/* STK in progress overlay */}
-            {stkPending && (stkStatus === "waiting" || stkStatus === "sending") && (
+            {!manualMode && stkPending && (stkStatus === "waiting" || stkStatus === "sending") && (
               <Card className="bg-primary/5 border-primary/20">
                 <CardContent className="p-4 space-y-3">
                   <div className="text-center space-y-1">
@@ -525,28 +582,27 @@ export default function Sales() {
                       Ref: {stkPending.messageRef} · {stkElapsed}s elapsed
                     </p>
                   </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="w-full gap-2"
-                    onClick={cancelStk}
-                    disabled={isCancelling}
-                  >
-                    <X className="h-4 w-4" /> {isCancelling ? "Cancelling…" : "Cancel STK"}
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline" className="flex-1 gap-2" onClick={cancelStk} disabled={isCancelling}>
+                      <X className="h-4 w-4" /> {isCancelling ? "Cancelling…" : "Cancel STK"}
+                    </Button>
+                    <Button size="sm" variant="secondary" className="flex-1 gap-2" onClick={openManualMode}>
+                      <Smartphone className="h-4 w-4" /> Enter M-Pesa manually
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             )}
 
-            {stkPending && stkStatus === "still_processing" && (
+            {!manualMode && stkPending && stkStatus === "still_processing" && (
               <Card className="bg-yellow-500/5 border-yellow-500/30">
                 <CardContent className="p-4 text-center space-y-3">
                   <p className="font-medium text-yellow-700 dark:text-yellow-500">
                     Payment is still being processed.
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    Co-op has not returned a final result yet. You can keep checking or cancel polling
-                    (this only stops the UI check — it does NOT cancel the customer's transaction).
+                    Co-op has not returned a final result yet. You can keep checking, cancel polling,
+                    or record the M-Pesa payment manually from the customer's SMS.
                   </p>
                   <p className="text-[11px] text-muted-foreground font-mono">Ref: {stkPending.messageRef}</p>
                   <div className="flex gap-2 justify-center flex-wrap">
@@ -556,6 +612,9 @@ export default function Sales() {
                     <Button size="sm" variant="outline" onClick={continueChecking} className="gap-2">
                       <Loader2 className="h-4 w-4" /> Continue Checking
                     </Button>
+                    <Button size="sm" variant="secondary" onClick={openManualMode} className="gap-2">
+                      <Smartphone className="h-4 w-4" /> Enter M-Pesa manually
+                    </Button>
                     <Button size="sm" variant="ghost" onClick={cancelStk} disabled={isCancelling} className="gap-2">
                       <X className="h-4 w-4" /> Cancel
                     </Button>
@@ -564,15 +623,22 @@ export default function Sales() {
               </Card>
             )}
 
-            {showRetry && (
+            {!manualMode && showRetry && (
               <Card className="bg-destructive/5 border-destructive/30">
                 <CardContent className="p-4 text-center space-y-3">
                   <p className="font-medium text-destructive">
-                    {stkStatus === "cancelled" ? "STK cancelled" : "Payment not completed"}
+                    {stkStatus === "cancelled" ? "STK cancelled" : "Automatic STK Push failed"}
                   </p>
-                  <div className="flex gap-2 justify-center">
+                  <p className="text-xs text-muted-foreground">
+                    You can retry the STK Push, record the M-Pesa payment manually, or close.
+                    The sale is preserved either way.
+                  </p>
+                  <div className="flex gap-2 justify-center flex-wrap">
                     <Button size="sm" variant="outline" onClick={retryStk} className="gap-2">
                       <RefreshCw className="h-4 w-4" /> Retry STK Push
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={openManualMode} className="gap-2">
+                      <Smartphone className="h-4 w-4" /> Enter M-Pesa manually
                     </Button>
                     <Button size="sm" variant="ghost" onClick={closeDialog}>Close</Button>
                   </div>
@@ -580,7 +646,8 @@ export default function Sales() {
               </Card>
             )}
 
-            {!stkPending && (
+            {!stkPending && !manualMode && (
+
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
