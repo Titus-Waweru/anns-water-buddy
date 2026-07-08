@@ -29,6 +29,16 @@ export default function Sales() {
   const [stkElapsed, setStkElapsed] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [manualMode, setManualMode] = useState(false);
+  const [manualSubmitting, setManualSubmitting] = useState(false);
+  const [manualForm, setManualForm] = useState({
+    customerName: "",
+    phone: "",
+    amount: 0,
+    mpesaCode: "",
+    paymentTime: new Date().toISOString().slice(0, 16),
+    notes: "",
+  });
   const idempotencyKeyRef = useRef<string | null>(null);
   const pollRef = useRef<number | null>(null);
   const clockRef = useRef<number | null>(null);
