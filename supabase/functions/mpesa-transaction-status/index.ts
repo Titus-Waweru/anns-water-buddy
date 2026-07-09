@@ -166,23 +166,38 @@ function parseCoopConfig(): CoopConfig {
   return cachedConfig;
 }
 
-async function getToken(cfg: CoopConfig, correlationId: string): Promise<string> {
+// Token generation IDENTICAL to mpesa-stk-push (same URL, same headers, same
+// Basic-auth handling, same Cache-Control: no-cache, same User-Agent). Supports
+// forceRefresh so a 401 on the status endpoint can invalidate the cached token
+// and retry — same pattern as STK push.
+async function getToken(cfg: CoopConfig, correlationId: string, forceRefresh = false): Promise<string> {
   const now = Date.now();
-  if (cachedToken && cachedToken.expiresAt > now + 30_000) return cachedToken.token;
+  if (!forceRefresh && cachedToken && cachedToken.expiresAt > now + 30_000) return cachedToken.token;
+  if (forceRefresh) cachedToken = null;
   const creds = cfg.rawBasicAuth ?? btoa(`${cfg.consumerKey}:${cfg.consumerSecret}`);
-  const res = await fetch(cfg.tokenUrl, {
+  const url = cfg.tokenUrl.split("?")[0];
+  console.log(JSON.stringify({
+    evt: "tx_status_token_fetch",
+    correlationId,
+    url,
+    raw_basic_auth_present: Boolean(cfg.rawBasicAuth),
+    basic_creds_len: creds.length,
+    force_refresh: forceRefresh,
+  }));
+  const res = await fetch(url, {
     method: "POST",
     headers: {
       Authorization: `Basic ${creds}`,
       Accept: "application/json",
       "Content-Type": "application/x-www-form-urlencoded",
-      "User-Agent": "WonderAquaPOS/1.0",
+      "User-Agent": "WonderAquaPOS/1.0 (+https://wonderaqua.co.ke)",
+      "Cache-Control": "no-cache",
       "X-Correlation-Id": correlationId,
       ...(Deno.env.get("COOP_PROXY_SECRET")
         ? { "X-Proxy-Secret": Deno.env.get("COOP_PROXY_SECRET")! }
         : {}),
     },
-    body: "grant_type=client_credentials",
+    body: new URLSearchParams({ grant_type: "client_credentials" }).toString(),
   });
   const text = await res.text();
   let data: any = {};
