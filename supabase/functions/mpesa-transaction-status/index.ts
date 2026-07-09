@@ -400,7 +400,7 @@ Deno.serve(async (req) => {
 
     // Persist the response so PaymentsTrace shows it and reconcile sees it.
     const update: Record<string, unknown> = {
-      raw_payload: data,
+      raw_payload: { checked_at: new Date().toISOString(), response: data },
       updated_at: new Date().toISOString(),
     };
     if (code) update.result_code = code;
