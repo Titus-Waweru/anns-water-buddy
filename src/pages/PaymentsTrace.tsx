@@ -346,11 +346,38 @@ export default function PaymentsTrace() {
                 <p className="text-xs text-muted-foreground mb-1">Request payload sent to Co-op</p>
                 <pre className="p-3 rounded bg-muted text-[11px] overflow-auto max-h-48">{JSON.stringify(selected.raw_request, null, 2)}</pre>
               </div>
-              <div>
-                <p className="text-xs text-muted-foreground mb-1">Latest Transaction Status response</p>
-                <pre className="p-3 rounded bg-muted text-[11px] overflow-auto max-h-48">
-                  {selected.raw_payload ? JSON.stringify(selected.raw_payload, null, 2) : "No status result yet. Click Check Status Now."}
-                </pre>
+              <div className="rounded-lg border p-3 space-y-2 bg-muted/30">
+                <p className="text-sm font-semibold">Transaction Status Response</p>
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <p className="text-muted-foreground">Last status check</p>
+                    <p className="font-mono">
+                      {selected.raw_payload?.checked_at
+                        ? new Date(selected.raw_payload.checked_at).toLocaleString()
+                        : new Date(selected.updated_at).toLocaleString()}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Current status</p>
+                    <StatusBadge status={selected.status} />
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Result code</p>
+                    <p className="font-mono">{selected.result_code || "—"}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Result description</p>
+                    <p>{selected.result_description || "—"}</p>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">Latest response from Co-op</p>
+                  <pre className="p-3 rounded bg-background border text-[11px] overflow-auto max-h-48">
+                    {selected.raw_payload
+                      ? JSON.stringify(selected.raw_payload.response ?? selected.raw_payload, null, 2)
+                      : "No status result yet. Click Check Status Now."}
+                  </pre>
+                </div>
               </div>
             </div>
           )}

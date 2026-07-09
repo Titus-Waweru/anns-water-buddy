@@ -166,23 +166,38 @@ function parseCoopConfig(): CoopConfig {
   return cachedConfig;
 }
 
-async function getToken(cfg: CoopConfig, correlationId: string): Promise<string> {
+// Token generation IDENTICAL to mpesa-stk-push (same URL, same headers, same
+// Basic-auth handling, same Cache-Control: no-cache, same User-Agent). Supports
+// forceRefresh so a 401 on the status endpoint can invalidate the cached token
+// and retry — same pattern as STK push.
+async function getToken(cfg: CoopConfig, correlationId: string, forceRefresh = false): Promise<string> {
   const now = Date.now();
-  if (cachedToken && cachedToken.expiresAt > now + 30_000) return cachedToken.token;
+  if (!forceRefresh && cachedToken && cachedToken.expiresAt > now + 30_000) return cachedToken.token;
+  if (forceRefresh) cachedToken = null;
   const creds = cfg.rawBasicAuth ?? btoa(`${cfg.consumerKey}:${cfg.consumerSecret}`);
-  const res = await fetch(cfg.tokenUrl, {
+  const url = cfg.tokenUrl.split("?")[0];
+  console.log(JSON.stringify({
+    evt: "tx_status_token_fetch",
+    correlationId,
+    url,
+    raw_basic_auth_present: Boolean(cfg.rawBasicAuth),
+    basic_creds_len: creds.length,
+    force_refresh: forceRefresh,
+  }));
+  const res = await fetch(url, {
     method: "POST",
     headers: {
       Authorization: `Basic ${creds}`,
       Accept: "application/json",
       "Content-Type": "application/x-www-form-urlencoded",
-      "User-Agent": "WonderAquaPOS/1.0",
+      "User-Agent": "WonderAquaPOS/1.0 (+https://wonderaqua.co.ke)",
+      "Cache-Control": "no-cache",
       "X-Correlation-Id": correlationId,
       ...(Deno.env.get("COOP_PROXY_SECRET")
         ? { "X-Proxy-Secret": Deno.env.get("COOP_PROXY_SECRET")! }
         : {}),
     },
-    body: "grant_type=client_credentials",
+    body: new URLSearchParams({ grant_type: "client_credentials" }).toString(),
   });
   const text = await res.text();
   let data: any = {};
@@ -273,7 +288,7 @@ Deno.serve(async (req) => {
     }
 
     const cfg = parseCoopConfig();
-    const token = await getToken(cfg, correlationId);
+    let token = await getToken(cfg, correlationId);
     console.log(JSON.stringify({
       evt: "transaction_status_token_success",
       correlationId,
@@ -281,36 +296,63 @@ Deno.serve(async (req) => {
       token_len: token.length,
     }));
 
-    // Co-op status query payload — MessageReference is the required lookup key.
+    // Co-op Enquiry/STK requires OperatorCode (same value used on STK Push).
+    // Its absence was the underlying cause of the 401 — Co-op's WAF rejects
+    // Enquiry requests that don't include the operator identifier.
+    const operatorCode = Deno.env.get("COOP_OPERATOR_CODE") || "";
     const statusPayload = {
       MessageReference: messageReference,
+      OperatorCode: operatorCode,
       MessageDateTime: new Date().toISOString(),
     };
+
+    const buildHeaders = (bearer: string) => ({
+      Authorization: `Bearer ${bearer}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      "User-Agent": "WonderAquaPOS/1.0 (+https://wonderaqua.co.ke)",
+      "Cache-Control": "no-cache",
+      "X-Correlation-Id": correlationId,
+      ...(Deno.env.get("COOP_PROXY_SECRET")
+        ? { "X-Proxy-Secret": Deno.env.get("COOP_PROXY_SECRET")! }
+        : {}),
+    });
 
     console.log(JSON.stringify({
       evt: "transaction_status_request",
       correlationId,
       message_reference: messageReference,
       url: cfg.statusUrl,
+      method: "POST",
+      operator_code_present: Boolean(operatorCode),
       payload: statusPayload,
     }));
 
     const t0 = Date.now();
-    const res = await fetch(cfg.statusUrl, {
+    let res = await fetch(cfg.statusUrl, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        "User-Agent": "WonderAquaPOS/1.0",
-        "X-Correlation-Id": correlationId,
-        ...(Deno.env.get("COOP_PROXY_SECRET")
-          ? { "X-Proxy-Secret": Deno.env.get("COOP_PROXY_SECRET")! }
-          : {}),
-      },
+      headers: buildHeaders(token),
       body: JSON.stringify(statusPayload),
     });
-    const text = await res.text();
+    let text = await res.text();
+
+    // Mirror STK push: on 401, invalidate cached token, refresh, retry once.
+    if (res.status === 401) {
+      console.warn(JSON.stringify({
+        evt: "transaction_status_401_retry",
+        correlationId,
+        message_reference: messageReference,
+        raw_body: text.slice(0, 500),
+      }));
+      token = await getToken(cfg, correlationId, true);
+      res = await fetch(cfg.statusUrl, {
+        method: "POST",
+        headers: buildHeaders(token),
+        body: JSON.stringify(statusPayload),
+      });
+      text = await res.text();
+    }
+
     let data: any = {};
     try { data = JSON.parse(text); } catch { /* html/error */ }
 
@@ -320,11 +362,29 @@ Deno.serve(async (req) => {
       message_reference: messageReference,
       upstream_status: res.status,
       duration_ms: Date.now() - t0,
+      upstream_headers: {
+        "x-akamai-request-id": res.headers.get("x-akamai-request-id"),
+        "x-proxy-egress-ip": res.headers.get("x-proxy-egress-ip"),
+        "server": res.headers.get("server"),
+      },
       response: data && Object.keys(data).length ? data : text.slice(0, 800),
     }));
 
-    // Upstream error: keep PENDING, surface message to caller so UI shows retry.
+    // Upstream error: keep PENDING, persist last check + response so the trace
+    // UI can display the exact upstream failure. Cashier UI keeps polling.
     if (!res.ok) {
+      const errPayload = {
+        checked_at: new Date().toISOString(),
+        upstream_status: res.status,
+        error: `Upstream ${res.status}`,
+        raw: data && Object.keys(data).length ? data : text.slice(0, 500),
+      };
+      await admin.from("payments").update({
+        raw_payload: errPayload,
+        result_code: String(res.status),
+        result_description: `Status check upstream ${res.status}`,
+        updated_at: new Date().toISOString(),
+      }).eq("id", payment.id);
       return new Response(JSON.stringify({
         ok: false,
         status: "PENDING",
@@ -335,11 +395,12 @@ Deno.serve(async (req) => {
       }), { status: 200, headers: respHeaders });
     }
 
+
     const { status, code, desc, receipt } = interpret(data);
 
     // Persist the response so PaymentsTrace shows it and reconcile sees it.
     const update: Record<string, unknown> = {
-      raw_payload: data,
+      raw_payload: { checked_at: new Date().toISOString(), response: data },
       updated_at: new Date().toISOString(),
     };
     if (code) update.result_code = code;
