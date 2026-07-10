@@ -117,6 +117,70 @@ export default function Customers() {
     });
   };
 
+  // Load credit payment history whenever a customer detail dialog opens.
+  useEffect(() => {
+    if (!detailCustomer) { setCreditPayments([]); return; }
+    (async () => {
+      const { data } = await supabase
+        .from("credit_payments")
+        .select("*")
+        .eq("customer_id", detailCustomer)
+        .order("created_at", { ascending: false });
+      setCreditPayments((data || []) as CreditPayment[]);
+    })();
+  }, [detailCustomer]);
+
+  const openRecordPayment = () => {
+    const bal = customers.find((c: any) => c.id === detailCustomer)?.credit_balance || 0;
+    setPayForm({ amount: bal, payment_mode: "Cash", mpesa_receipt: "", notes: "" });
+    setPayOpen(true);
+  };
+
+  const submitCreditPayment = async () => {
+    if (!detailCustomer) return;
+    const customer = customers.find((c: any) => c.id === detailCustomer);
+    if (!customer) return;
+    const amt = Number(payForm.amount);
+    if (!amt || amt <= 0) { toast({ title: "Enter a valid amount", variant: "destructive" }); return; }
+    if (amt > customer.credit_balance) {
+      toast({ title: "Amount exceeds outstanding balance", description: `Balance: KSh ${customer.credit_balance.toLocaleString()}`, variant: "destructive" });
+      return;
+    }
+    if (payForm.payment_mode === "Mpesa") {
+      const code = payForm.mpesa_receipt.trim().toUpperCase();
+      if (!/^[A-Z0-9]{10}$/.test(code)) {
+        toast({ title: "Enter a valid 10-character M-Pesa code", variant: "destructive" });
+        return;
+      }
+    }
+    setPaySubmitting(true);
+    try {
+      const newBalance = Math.max(0, Number(customer.credit_balance) - amt);
+      const { error } = await supabase.from("credit_payments").insert({
+        customer_id: detailCustomer,
+        amount: amt,
+        payment_mode: payForm.payment_mode,
+        mpesa_receipt: payForm.payment_mode === "Mpesa" ? payForm.mpesa_receipt.trim().toUpperCase() : null,
+        notes: payForm.notes || null,
+        recorded_by: user?.id || null,
+        branch_id: effectiveBranchId || null,
+        balance_after: newBalance,
+      });
+      if (error) throw error;
+      await supabase.from("customers").update({ credit_balance: newBalance }).eq("id", detailCustomer);
+      toast({ title: "Payment recorded", description: `Remaining balance: KSh ${newBalance.toLocaleString()}` });
+      setPayOpen(false);
+      // Refresh list & payment history.
+      const { data } = await supabase.from("credit_payments").select("*").eq("customer_id", detailCustomer).order("created_at", { ascending: false });
+      setCreditPayments((data || []) as CreditPayment[]);
+      refetch?.();
+    } catch (e: any) {
+      toast({ title: "Failed to record payment", description: e.message, variant: "destructive" });
+    } finally {
+      setPaySubmitting(false);
+    }
+
+
   const customerSales = useMemo(() => {
     if (!detailCustomer) return [];
     return sales.filter(s => s.customer_id === detailCustomer);
