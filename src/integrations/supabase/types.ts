@@ -150,6 +150,63 @@ export type Database = {
           },
         ]
       }
+      credit_payments: {
+        Row: {
+          amount: number
+          balance_after: number
+          branch_id: string | null
+          created_at: string
+          customer_id: string
+          id: string
+          mpesa_receipt: string | null
+          notes: string | null
+          payment_mode: string
+          recorded_by: string | null
+          updated_at: string
+        }
+        Insert: {
+          amount: number
+          balance_after: number
+          branch_id?: string | null
+          created_at?: string
+          customer_id: string
+          id?: string
+          mpesa_receipt?: string | null
+          notes?: string | null
+          payment_mode?: string
+          recorded_by?: string | null
+          updated_at?: string
+        }
+        Update: {
+          amount?: number
+          balance_after?: number
+          branch_id?: string | null
+          created_at?: string
+          customer_id?: string
+          id?: string
+          mpesa_receipt?: string | null
+          notes?: string | null
+          payment_mode?: string
+          recorded_by?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "credit_payments_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "credit_payments_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       customers: {
         Row: {
           address: string | null

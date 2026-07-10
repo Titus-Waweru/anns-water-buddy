@@ -50,7 +50,12 @@ export default function Sales() {
     discountType: "fixed" as DiscountType,
     discountValue: 0,
     paymentMode: "Cash" as PaymentMode,
+    // Mpesa sub-mode. "stk" = automatic STK push, "manual" = cashier
+    // records the M-Pesa transaction code from customer's SMS.
+    mpesaEntryMode: "stk" as "stk" | "manual",
+    mpesaCode: "",
   });
+
 
   const selectedProduct = products.find(p => p.id === form.productId);
   const selectedCustomer = customers.find(c => c.id === form.customerId);
@@ -239,9 +244,17 @@ export default function Sales() {
       return;
     }
     if (form.paymentMode === "Mpesa" && !mpesaPhone.trim()) {
-      toast.error("Enter customer phone number for STK push");
+      toast.error("Enter customer phone number");
       return;
     }
+    if (form.paymentMode === "Mpesa" && form.mpesaEntryMode === "manual") {
+      const code = form.mpesaCode.trim().toUpperCase();
+      if (!/^[A-Z0-9]{10}$/.test(code)) {
+        toast.error("Enter a valid 10-character M-Pesa transaction code.");
+        return;
+      }
+    }
+
 
     setIsSubmitting(true);
     try {
@@ -270,6 +283,64 @@ export default function Sales() {
         date: new Date().toISOString(),
       };
 
+      if (form.paymentMode === "Mpesa" && form.mpesaEntryMode === "manual") {
+        // Manual M-Pesa: sale finalizes immediately as PAID.
+        const code = form.mpesaCode.trim().toUpperCase();
+        // Reject duplicate M-Pesa transaction codes.
+        const { data: dup } = await supabase
+          .from("payments")
+          .select("id")
+          .eq("mpesa_receipt", code)
+          .maybeSingle();
+        if (dup) {
+          toast.error("That M-Pesa transaction code has already been recorded.");
+          return;
+        }
+        const { data: sale, error } = await supabase
+          .from("sales")
+          .insert({
+            ...saleData,
+            branch_id: effectiveBranchId,
+            recorded_by: user?.id,
+            payment_status: "PAID",
+            idempotency_key: idempotencyKey,
+          })
+          .select()
+          .single();
+        if (error || !sale) {
+          toast.error(error?.message || "Could not create sale");
+          return;
+        }
+        const messageRef = `MANUAL-${sale.id.slice(0, 8).toUpperCase()}-${Date.now()}`;
+        await supabase.from("payments").insert({
+          provider: "coop",
+          sale_id: sale.id,
+          message_reference: messageRef,
+          transaction_currency: "KES",
+          initiated_by: user?.id || null,
+          branch_id: effectiveBranchId,
+          narration: `Manual M-Pesa ${code}`,
+          status: "SUCCESS",
+          payment_method: "MPESA_MANUAL",
+          payment_source: "Manual Entry",
+          mpesa_receipt: code,
+          payment_time: new Date().toISOString(),
+          transaction_date: new Date().toISOString(),
+          phone_number: mpesaPhone.trim(),
+          amount: finalAmount,
+          entered_by: user?.id || null,
+          result_code: "0",
+          result_description: "Manual M-Pesa entry",
+        });
+        await finalizeSale(sale.id);
+        toast.success("Manual M-Pesa payment recorded.");
+        idempotencyKeyRef.current = null;
+        setForm({ customerId: "", productId: "", quantity: 1, discountType: "fixed", discountValue: 0, paymentMode: "Cash", mpesaEntryMode: "stk", mpesaCode: "" });
+        setMpesaPhone("");
+        setOpen(false);
+        return;
+      }
+
       if (form.paymentMode === "Mpesa") {
         // Insert PENDING sale directly (skip context — it deducts inventory)
         const { data: sale, error } = await supabase
@@ -295,6 +366,7 @@ export default function Sales() {
         await sendStkPush(sale.id, mpesaPhone, finalAmount);
         return;
       }
+
 
       // Cash / Credit — standard path (PAID, deducts inventory in context)
       await addSale({ ...saleData, idempotency_key: idempotencyKey } as any);
@@ -330,7 +402,8 @@ export default function Sales() {
 
       toast.success("Sale recorded successfully!");
       idempotencyKeyRef.current = null;
-      setForm({ customerId: "", productId: "", quantity: 1, discountType: "fixed", discountValue: 0, paymentMode: "Cash" });
+      setForm({ customerId: "", productId: "", quantity: 1, discountType: "fixed", discountValue: 0, paymentMode: "Cash", mpesaEntryMode: "stk", mpesaCode: "" });
+
       setMpesaPhone("");
       setOpen(false);
     } finally {
@@ -348,7 +421,7 @@ export default function Sales() {
     setStkStatus("idle");
     setManualMode(false);
     idempotencyKeyRef.current = null;
-    setForm({ customerId: "", productId: "", quantity: 1, discountType: "fixed", discountValue: 0, paymentMode: "Cash" });
+    setForm({ customerId: "", productId: "", quantity: 1, discountType: "fixed", discountValue: 0, paymentMode: "Cash", mpesaEntryMode: "stk", mpesaCode: "" });
     setMpesaPhone("");
   };
 
@@ -696,18 +769,49 @@ export default function Sales() {
                   <CardContent className="p-3 space-y-3">
                     <div className="flex items-center gap-2 text-sm font-medium text-foreground">
                       <Smartphone className="h-4 w-4 text-primary" />
-                      Co-op Bank STK Push
+                      M-Pesa Payment
+                    </div>
+                    <div>
+                      <Label>M-Pesa Method</Label>
+                      <Select
+                        value={form.mpesaEntryMode}
+                        onValueChange={v => setForm({ ...form, mpesaEntryMode: v as "stk" | "manual", mpesaCode: "" })}
+                      >
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="stk">Send STK Push (automatic)</SelectItem>
+                          <SelectItem value="manual">Enter M-Pesa Manually</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div>
                       <Label>Customer Phone *</Label>
                       <Input value={mpesaPhone} onChange={e => setMpesaPhone(e.target.value)} placeholder="e.g. 0712345678" />
                     </div>
+                    {form.mpesaEntryMode === "manual" && (
+                      <div>
+                        <Label>M-Pesa Transaction Code *</Label>
+                        <Input
+                          value={form.mpesaCode}
+                          onChange={e => setForm({ ...form, mpesaCode: e.target.value.toUpperCase() })}
+                          placeholder="e.g. SFE1A2B3C4"
+                          maxLength={10}
+                          className="font-mono"
+                        />
+                        <p className="text-[11px] text-muted-foreground mt-1">
+                          10-character code from the customer's M-Pesa SMS. Duplicates are rejected.
+                        </p>
+                      </div>
+                    )}
                     <p className="text-xs text-muted-foreground">
-                      Customer will get an STK prompt. Sale finalizes only after payment confirmation.
+                      {form.mpesaEntryMode === "stk"
+                        ? "Customer gets an STK prompt. Sale finalizes only after payment confirmation."
+                        : "Sale finalizes immediately once the M-Pesa code is saved."}
                     </p>
                   </CardContent>
                 </Card>
               )}
+
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -740,7 +844,10 @@ export default function Sales() {
 
               <Button type="submit" className="w-full gap-2" disabled={!form.productId || isSubmitting || stkStatus === "sending"}>
                 {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
-                {form.paymentMode === "Mpesa" ? "Send STK Push" : "Record Sale"}
+                {form.paymentMode === "Mpesa"
+                  ? (form.mpesaEntryMode === "manual" ? "Save M-Pesa Payment" : "Send STK Push")
+                  : "Record Sale"}
+
               </Button>
             </form>
             )}

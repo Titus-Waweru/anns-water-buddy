@@ -1,6 +1,7 @@
-import { useState, useMemo, useRef, useCallback } from "react";
+import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { useData } from "@/context/DataContext";
 import { useAuth } from "@/context/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,15 +10,27 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Users, Search, FileText, Phone, Mail, MapPin, Star, Pencil, Trash2, Download, Printer } from "lucide-react";
+import { Plus, Users, Search, FileText, Phone, Mail, MapPin, Star, Pencil, Trash2, Download, Printer, Wallet, History } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import InvoicePDF from "@/components/InvoicePDF";
 import AnimatedPage from "@/components/AnimatedPage";
 
+type CreditPayment = {
+  id: string;
+  customer_id: string;
+  amount: number;
+  payment_mode: string;
+  mpesa_receipt: string | null;
+  notes: string | null;
+  balance_after: number;
+  created_at: string;
+};
+
+
 export default function Customers() {
-  const { customers, sales, addCustomer, updateCustomer, deleteCustomer } = useData();
-  const { isAdmin } = useAuth();
+  const { customers, sales, addCustomer, updateCustomer, deleteCustomer, refetch, effectiveBranchId } = useData() as any;
+  const { isAdmin, user } = useAuth() as any;
   const [open, setOpen] = useState(false);
   const [detailCustomer, setDetailCustomer] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
@@ -29,6 +42,11 @@ export default function Customers() {
     customer_type: "regular" as string, credit_balance: 0,
   });
   const [submitting, setSubmitting] = useState(false);
+  const [creditPayments, setCreditPayments] = useState<CreditPayment[]>([]);
+  const [payOpen, setPayOpen] = useState(false);
+  const [payForm, setPayForm] = useState({ amount: 0, payment_mode: "Cash", mpesa_receipt: "", notes: "" });
+  const [paySubmitting, setPaySubmitting] = useState(false);
+
 
   const filteredCustomers = useMemo(() => {
     return customers.filter(c => {
@@ -98,6 +116,73 @@ export default function Customers() {
       customer_type: (c as any).customer_type || "regular", credit_balance: c.credit_balance,
     });
   };
+
+  // Load credit payment history whenever a customer detail dialog opens.
+  useEffect(() => {
+    if (!detailCustomer) { setCreditPayments([]); return; }
+    (async () => {
+      const { data } = await supabase
+        .from("credit_payments")
+        .select("*")
+        .eq("customer_id", detailCustomer)
+        .order("created_at", { ascending: false });
+      setCreditPayments((data || []) as CreditPayment[]);
+    })();
+  }, [detailCustomer]);
+
+  const openRecordPayment = () => {
+    const bal = customers.find((c: any) => c.id === detailCustomer)?.credit_balance || 0;
+    setPayForm({ amount: bal, payment_mode: "Cash", mpesa_receipt: "", notes: "" });
+    setPayOpen(true);
+  };
+
+  const submitCreditPayment = async () => {
+    if (!detailCustomer) return;
+    const customer = customers.find((c: any) => c.id === detailCustomer);
+    if (!customer) return;
+    const amt = Number(payForm.amount);
+    if (!amt || amt <= 0) { toast({ title: "Enter a valid amount", variant: "destructive" }); return; }
+    if (amt > customer.credit_balance) {
+      toast({ title: "Amount exceeds outstanding balance", description: `Balance: KSh ${customer.credit_balance.toLocaleString()}`, variant: "destructive" });
+      return;
+    }
+    if (payForm.payment_mode === "Mpesa") {
+      const code = payForm.mpesa_receipt.trim().toUpperCase();
+      if (!/^[A-Z0-9]{10}$/.test(code)) {
+        toast({ title: "Enter a valid 10-character M-Pesa code", variant: "destructive" });
+        return;
+      }
+    }
+    setPaySubmitting(true);
+    try {
+      const newBalance = Math.max(0, Number(customer.credit_balance) - amt);
+      const { error } = await supabase.from("credit_payments").insert({
+        customer_id: detailCustomer,
+        amount: amt,
+        payment_mode: payForm.payment_mode,
+        mpesa_receipt: payForm.payment_mode === "Mpesa" ? payForm.mpesa_receipt.trim().toUpperCase() : null,
+        notes: payForm.notes || null,
+        recorded_by: user?.id || null,
+        branch_id: effectiveBranchId || null,
+        balance_after: newBalance,
+      });
+      if (error) throw error;
+      await supabase.from("customers").update({ credit_balance: newBalance }).eq("id", detailCustomer);
+      toast({ title: "Payment recorded", description: `Remaining balance: KSh ${newBalance.toLocaleString()}` });
+      setPayOpen(false);
+      // Refresh list & payment history.
+      const { data } = await supabase.from("credit_payments").select("*").eq("customer_id", detailCustomer).order("created_at", { ascending: false });
+      setCreditPayments((data || []) as CreditPayment[]);
+      refetch?.();
+    } catch (e: any) {
+      toast({ title: "Failed to record payment", description: e.message, variant: "destructive" });
+    } finally {
+      setPaySubmitting(false);
+    }
+  };
+
+
+
 
   const customerSales = useMemo(() => {
     if (!detailCustomer) return [];
@@ -278,7 +363,8 @@ export default function Customers() {
                 <Tabs defaultValue="info">
                   <TabsList className="w-full">
                     <TabsTrigger value="info" className="flex-1">Info</TabsTrigger>
-                    <TabsTrigger value="history" className="flex-1">Purchase History</TabsTrigger>
+                    <TabsTrigger value="history" className="flex-1">Sales</TabsTrigger>
+                    <TabsTrigger value="payments" className="flex-1">Payments</TabsTrigger>
                     {selectedCustomer.credit_balance > 0 && <TabsTrigger value="invoice" className="flex-1">Invoice</TabsTrigger>}
                   </TabsList>
                   <TabsContent value="info" className="space-y-3 mt-3">
@@ -290,9 +376,51 @@ export default function Customers() {
                       <div><span className="text-muted-foreground">Credit Balance:</span><p className="font-medium text-destructive">KSh {selectedCustomer.credit_balance.toLocaleString()}</p></div>
                       <div><span className="text-muted-foreground">Loyalty Points:</span><p className="font-medium">{selectedCustomer.loyalty_points}</p></div>
                     </div>
+                    {selectedCustomer.credit_balance > 0 && (
+                      <Button className="w-full gap-2" onClick={openRecordPayment}>
+                        <Wallet className="h-4 w-4" /> Record Payment
+                      </Button>
+                    )}
                     {selectedCustomer.notes && <p className="text-sm text-muted-foreground italic">{selectedCustomer.notes}</p>}
                   </TabsContent>
+                  <TabsContent value="payments" className="mt-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-muted-foreground">
+                        Outstanding: <span className="font-semibold text-destructive">KSh {selectedCustomer.credit_balance.toLocaleString()}</span>
+                      </p>
+                      {selectedCustomer.credit_balance > 0 && (
+                        <Button size="sm" className="gap-2" onClick={openRecordPayment}>
+                          <Plus className="h-3 w-3" /> Record
+                        </Button>
+                      )}
+                    </div>
+                    {creditPayments.length === 0 ? (
+                      <p className="text-sm text-muted-foreground text-center py-6 flex items-center justify-center gap-2">
+                        <History className="h-4 w-4" /> No credit payments recorded yet.
+                      </p>
+                    ) : (
+                      <div className="space-y-2 max-h-[320px] overflow-y-auto">
+                        {creditPayments.map(p => (
+                          <div key={p.id} className="flex items-center justify-between text-sm border rounded p-2">
+                            <div>
+                              <p className="font-medium">KSh {Number(p.amount).toLocaleString()} <Badge variant="outline" className="text-[10px] ml-1">{p.payment_mode}</Badge></p>
+                              <p className="text-xs text-muted-foreground">
+                                {format(new Date(p.created_at), "dd MMM yyyy, HH:mm")}
+                                {p.mpesa_receipt && ` · ${p.mpesa_receipt}`}
+                              </p>
+                              {p.notes && <p className="text-xs text-muted-foreground italic">{p.notes}</p>}
+                            </div>
+                            <div className="text-right text-xs">
+                              <p className="text-muted-foreground">Balance after</p>
+                              <p className="font-mono">KSh {Number(p.balance_after).toLocaleString()}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </TabsContent>
                   <TabsContent value="history" className="mt-3">
+
                     {customerSales.length === 0 ? (
                       <p className="text-sm text-muted-foreground text-center py-6">No purchases yet.</p>
                     ) : (
@@ -350,6 +478,53 @@ export default function Customers() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Record credit payment */}
+      <Dialog open={payOpen} onOpenChange={setPayOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Record Payment</DialogTitle></DialogHeader>
+          {selectedCustomer && (
+            <div className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Outstanding: <span className="font-semibold text-destructive">KSh {selectedCustomer.credit_balance.toLocaleString()}</span>
+              </p>
+              <div>
+                <Label>Amount (KSh) *</Label>
+                <Input type="number" min={1} max={selectedCustomer.credit_balance} value={payForm.amount || ""}
+                  onChange={e => setPayForm({ ...payForm, amount: Number(e.target.value) })} />
+              </div>
+              <div>
+                <Label>Payment Mode</Label>
+                <Select value={payForm.payment_mode} onValueChange={v => setPayForm({ ...payForm, payment_mode: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Cash">Cash</SelectItem>
+                    <SelectItem value="Mpesa">M-Pesa</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {payForm.payment_mode === "Mpesa" && (
+                <div>
+                  <Label>M-Pesa Transaction Code *</Label>
+                  <Input value={payForm.mpesa_receipt} onChange={e => setPayForm({ ...payForm, mpesa_receipt: e.target.value.toUpperCase() })}
+                    placeholder="e.g. SFE1A2B3C4" maxLength={10} className="font-mono" />
+                </div>
+              )}
+              <div>
+                <Label>Notes (optional)</Label>
+                <Input value={payForm.notes} onChange={e => setPayForm({ ...payForm, notes: e.target.value })} />
+              </div>
+              <DialogFooter className="gap-2">
+                <Button variant="outline" onClick={() => setPayOpen(false)} disabled={paySubmitting}>Cancel</Button>
+                <Button onClick={submitCreditPayment} disabled={paySubmitting}>
+                  {paySubmitting ? "Saving…" : "Save Payment"}
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
 
       {/* Delete Confirmation */}
       <Dialog open={!!deleteConfirm} onOpenChange={o => { if (!o) setDeleteConfirm(null); }}>
