@@ -479,6 +479,53 @@ export default function Customers() {
         </DialogContent>
       </Dialog>
 
+      {/* Record credit payment */}
+      <Dialog open={payOpen} onOpenChange={setPayOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Record Payment</DialogTitle></DialogHeader>
+          {selectedCustomer && (
+            <div className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Outstanding: <span className="font-semibold text-destructive">KSh {selectedCustomer.credit_balance.toLocaleString()}</span>
+              </p>
+              <div>
+                <Label>Amount (KSh) *</Label>
+                <Input type="number" min={1} max={selectedCustomer.credit_balance} value={payForm.amount || ""}
+                  onChange={e => setPayForm({ ...payForm, amount: Number(e.target.value) })} />
+              </div>
+              <div>
+                <Label>Payment Mode</Label>
+                <Select value={payForm.payment_mode} onValueChange={v => setPayForm({ ...payForm, payment_mode: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Cash">Cash</SelectItem>
+                    <SelectItem value="Mpesa">M-Pesa</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {payForm.payment_mode === "Mpesa" && (
+                <div>
+                  <Label>M-Pesa Transaction Code *</Label>
+                  <Input value={payForm.mpesa_receipt} onChange={e => setPayForm({ ...payForm, mpesa_receipt: e.target.value.toUpperCase() })}
+                    placeholder="e.g. SFE1A2B3C4" maxLength={10} className="font-mono" />
+                </div>
+              )}
+              <div>
+                <Label>Notes (optional)</Label>
+                <Input value={payForm.notes} onChange={e => setPayForm({ ...payForm, notes: e.target.value })} />
+              </div>
+              <DialogFooter className="gap-2">
+                <Button variant="outline" onClick={() => setPayOpen(false)} disabled={paySubmitting}>Cancel</Button>
+                <Button onClick={submitCreditPayment} disabled={paySubmitting}>
+                  {paySubmitting ? "Saving…" : "Save Payment"}
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+
       {/* Delete Confirmation */}
       <Dialog open={!!deleteConfirm} onOpenChange={o => { if (!o) setDeleteConfirm(null); }}>
         <DialogContent className="max-w-sm">
