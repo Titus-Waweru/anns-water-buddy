@@ -29,8 +29,8 @@ type CreditPayment = {
 
 
 export default function Customers() {
-  const { customers, sales, addCustomer, updateCustomer, deleteCustomer } = useData();
-  const { isAdmin } = useAuth();
+  const { customers, sales, addCustomer, updateCustomer, deleteCustomer, refetch, effectiveBranchId } = useData() as any;
+  const { isAdmin, user } = useAuth() as any;
   const [open, setOpen] = useState(false);
   const [detailCustomer, setDetailCustomer] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
@@ -42,6 +42,11 @@ export default function Customers() {
     customer_type: "regular" as string, credit_balance: 0,
   });
   const [submitting, setSubmitting] = useState(false);
+  const [creditPayments, setCreditPayments] = useState<CreditPayment[]>([]);
+  const [payOpen, setPayOpen] = useState(false);
+  const [payForm, setPayForm] = useState({ amount: 0, payment_mode: "Cash", mpesa_receipt: "", notes: "" });
+  const [paySubmitting, setPaySubmitting] = useState(false);
+
 
   const filteredCustomers = useMemo(() => {
     return customers.filter(c => {
