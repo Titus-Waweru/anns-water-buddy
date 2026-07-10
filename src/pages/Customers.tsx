@@ -363,7 +363,8 @@ export default function Customers() {
                 <Tabs defaultValue="info">
                   <TabsList className="w-full">
                     <TabsTrigger value="info" className="flex-1">Info</TabsTrigger>
-                    <TabsTrigger value="history" className="flex-1">Purchase History</TabsTrigger>
+                    <TabsTrigger value="history" className="flex-1">Sales</TabsTrigger>
+                    <TabsTrigger value="payments" className="flex-1">Payments</TabsTrigger>
                     {selectedCustomer.credit_balance > 0 && <TabsTrigger value="invoice" className="flex-1">Invoice</TabsTrigger>}
                   </TabsList>
                   <TabsContent value="info" className="space-y-3 mt-3">
@@ -375,9 +376,51 @@ export default function Customers() {
                       <div><span className="text-muted-foreground">Credit Balance:</span><p className="font-medium text-destructive">KSh {selectedCustomer.credit_balance.toLocaleString()}</p></div>
                       <div><span className="text-muted-foreground">Loyalty Points:</span><p className="font-medium">{selectedCustomer.loyalty_points}</p></div>
                     </div>
+                    {selectedCustomer.credit_balance > 0 && (
+                      <Button className="w-full gap-2" onClick={openRecordPayment}>
+                        <Wallet className="h-4 w-4" /> Record Payment
+                      </Button>
+                    )}
                     {selectedCustomer.notes && <p className="text-sm text-muted-foreground italic">{selectedCustomer.notes}</p>}
                   </TabsContent>
+                  <TabsContent value="payments" className="mt-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-muted-foreground">
+                        Outstanding: <span className="font-semibold text-destructive">KSh {selectedCustomer.credit_balance.toLocaleString()}</span>
+                      </p>
+                      {selectedCustomer.credit_balance > 0 && (
+                        <Button size="sm" className="gap-2" onClick={openRecordPayment}>
+                          <Plus className="h-3 w-3" /> Record
+                        </Button>
+                      )}
+                    </div>
+                    {creditPayments.length === 0 ? (
+                      <p className="text-sm text-muted-foreground text-center py-6 flex items-center justify-center gap-2">
+                        <History className="h-4 w-4" /> No credit payments recorded yet.
+                      </p>
+                    ) : (
+                      <div className="space-y-2 max-h-[320px] overflow-y-auto">
+                        {creditPayments.map(p => (
+                          <div key={p.id} className="flex items-center justify-between text-sm border rounded p-2">
+                            <div>
+                              <p className="font-medium">KSh {Number(p.amount).toLocaleString()} <Badge variant="outline" className="text-[10px] ml-1">{p.payment_mode}</Badge></p>
+                              <p className="text-xs text-muted-foreground">
+                                {format(new Date(p.created_at), "dd MMM yyyy, HH:mm")}
+                                {p.mpesa_receipt && ` · ${p.mpesa_receipt}`}
+                              </p>
+                              {p.notes && <p className="text-xs text-muted-foreground italic">{p.notes}</p>}
+                            </div>
+                            <div className="text-right text-xs">
+                              <p className="text-muted-foreground">Balance after</p>
+                              <p className="font-mono">KSh {Number(p.balance_after).toLocaleString()}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </TabsContent>
                   <TabsContent value="history" className="mt-3">
+
                     {customerSales.length === 0 ? (
                       <p className="text-sm text-muted-foreground text-center py-6">No purchases yet.</p>
                     ) : (
