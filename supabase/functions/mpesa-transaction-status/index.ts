@@ -143,9 +143,11 @@ function parseCoopConfig(): CoopConfig {
   tokenUrl = resolveVars(tokenUrl) || "https://openapi.co-opbank.co.ke/token";
   // Co-op confirmed Transaction Status endpoint: /Enquiry/STK/1.0.0
   // Override with COOP_STATUS_URL only if the bank changes the path.
+  // Official Co-op Postman path includes a trailing slash.
   statusUrl =
     Deno.env.get("COOP_STATUS_URL") ||
-    "https://openapi.co-opbank.co.ke/Enquiry/STK/1.0.0";
+    "https://openapi.co-opbank.co.ke/Enquiry/STK/1.0.0/";
+
 
   const proxyBase = (Deno.env.get("COOP_PROXY_BASE_URL") || "").replace(/\/+$/, "");
   if (proxyBase) {
