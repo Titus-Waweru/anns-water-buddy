@@ -283,6 +283,64 @@ export default function Sales() {
         date: new Date().toISOString(),
       };
 
+      if (form.paymentMode === "Mpesa" && form.mpesaEntryMode === "manual") {
+        // Manual M-Pesa: sale finalizes immediately as PAID.
+        const code = form.mpesaCode.trim().toUpperCase();
+        // Reject duplicate M-Pesa transaction codes.
+        const { data: dup } = await supabase
+          .from("payments")
+          .select("id")
+          .eq("mpesa_receipt", code)
+          .maybeSingle();
+        if (dup) {
+          toast.error("That M-Pesa transaction code has already been recorded.");
+          return;
+        }
+        const { data: sale, error } = await supabase
+          .from("sales")
+          .insert({
+            ...saleData,
+            branch_id: effectiveBranchId,
+            recorded_by: user?.id,
+            payment_status: "PAID",
+            idempotency_key: idempotencyKey,
+          })
+          .select()
+          .single();
+        if (error || !sale) {
+          toast.error(error?.message || "Could not create sale");
+          return;
+        }
+        const messageRef = `MANUAL-${sale.id.slice(0, 8).toUpperCase()}-${Date.now()}`;
+        await supabase.from("payments").insert({
+          provider: "coop",
+          sale_id: sale.id,
+          message_reference: messageRef,
+          transaction_currency: "KES",
+          initiated_by: user?.id || null,
+          branch_id: effectiveBranchId,
+          narration: `Manual M-Pesa ${code}`,
+          status: "SUCCESS",
+          payment_method: "MPESA_MANUAL",
+          payment_source: "Manual Entry",
+          mpesa_receipt: code,
+          payment_time: new Date().toISOString(),
+          transaction_date: new Date().toISOString(),
+          phone_number: mpesaPhone.trim(),
+          amount: finalAmount,
+          entered_by: user?.id || null,
+          result_code: "0",
+          result_description: "Manual M-Pesa entry",
+        });
+        await finalizeSale(sale.id);
+        toast.success("Manual M-Pesa payment recorded.");
+        idempotencyKeyRef.current = null;
+        setForm({ customerId: "", productId: "", quantity: 1, discountType: "fixed", discountValue: 0, paymentMode: "Cash", mpesaEntryMode: "stk", mpesaCode: "" });
+        setMpesaPhone("");
+        setOpen(false);
+        return;
+      }
+
       if (form.paymentMode === "Mpesa") {
         // Insert PENDING sale directly (skip context — it deducts inventory)
         const { data: sale, error } = await supabase
@@ -308,6 +366,7 @@ export default function Sales() {
         await sendStkPush(sale.id, mpesaPhone, finalAmount);
         return;
       }
+
 
       // Cash / Credit — standard path (PAID, deducts inventory in context)
       await addSale({ ...saleData, idempotency_key: idempotencyKey } as any);
