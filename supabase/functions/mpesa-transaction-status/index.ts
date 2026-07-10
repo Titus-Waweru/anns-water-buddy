@@ -322,8 +322,8 @@ Deno.serve(async (req) => {
       message_reference: messageReference,
       url: cfg.statusUrl,
       method: "POST",
-      operator_code_present: Boolean(operatorCode),
       payload: statusPayload,
+
     }));
 
     const t0 = Date.now();
