@@ -1,6 +1,7 @@
-import { useState, useMemo, useRef, useCallback } from "react";
+import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { useData } from "@/context/DataContext";
 import { useAuth } from "@/context/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,11 +10,23 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Users, Search, FileText, Phone, Mail, MapPin, Star, Pencil, Trash2, Download, Printer } from "lucide-react";
+import { Plus, Users, Search, FileText, Phone, Mail, MapPin, Star, Pencil, Trash2, Download, Printer, Wallet, History } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import InvoicePDF from "@/components/InvoicePDF";
 import AnimatedPage from "@/components/AnimatedPage";
+
+type CreditPayment = {
+  id: string;
+  customer_id: string;
+  amount: number;
+  payment_mode: string;
+  mpesa_receipt: string | null;
+  notes: string | null;
+  balance_after: number;
+  created_at: string;
+};
+
 
 export default function Customers() {
   const { customers, sales, addCustomer, updateCustomer, deleteCustomer } = useData();
