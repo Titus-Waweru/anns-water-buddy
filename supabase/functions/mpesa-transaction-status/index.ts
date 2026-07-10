@@ -143,9 +143,11 @@ function parseCoopConfig(): CoopConfig {
   tokenUrl = resolveVars(tokenUrl) || "https://openapi.co-opbank.co.ke/token";
   // Co-op confirmed Transaction Status endpoint: /Enquiry/STK/1.0.0
   // Override with COOP_STATUS_URL only if the bank changes the path.
+  // Official Co-op Postman path includes a trailing slash.
   statusUrl =
     Deno.env.get("COOP_STATUS_URL") ||
-    "https://openapi.co-opbank.co.ke/Enquiry/STK/1.0.0";
+    "https://openapi.co-opbank.co.ke/Enquiry/STK/1.0.0/";
+
 
   const proxyBase = (Deno.env.get("COOP_PROXY_BASE_URL") || "").replace(/\/+$/, "");
   if (proxyBase) {
@@ -296,15 +298,11 @@ Deno.serve(async (req) => {
       token_len: token.length,
     }));
 
-    // Co-op Enquiry/STK requires OperatorCode (same value used on STK Push).
-    // Its absence was the underlying cause of the 401 — Co-op's WAF rejects
-    // Enquiry requests that don't include the operator identifier.
-    const operatorCode = Deno.env.get("COOP_OPERATOR_CODE") || "";
-    const statusPayload = {
-      MessageReference: messageReference,
-      OperatorCode: operatorCode,
-      MessageDateTime: new Date().toISOString(),
-    };
+    // Official Co-op Postman body contains ONLY MessageReference. Do not
+    // add OperatorCode / MessageDateTime — extra fields cause the Enquiry
+    // endpoint to reject the request.
+    const statusPayload = { MessageReference: messageReference };
+
 
     const buildHeaders = (bearer: string) => ({
       Authorization: `Bearer ${bearer}`,
@@ -324,8 +322,8 @@ Deno.serve(async (req) => {
       message_reference: messageReference,
       url: cfg.statusUrl,
       method: "POST",
-      operator_code_present: Boolean(operatorCode),
       payload: statusPayload,
+
     }));
 
     const t0 = Date.now();
