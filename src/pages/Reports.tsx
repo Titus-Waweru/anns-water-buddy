@@ -3,7 +3,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { isToday, startOfMonth, isAfter, format } from "date-fns";
 
 export default function Reports() {
-  const { sales, purchases, products } = useData();
+  const { sales: allSales, purchases, products } = useData();
+
+  // PENDING sales are not completed transactions — exclude them from every
+  // aggregate on this page (revenue, profit, counts, payment totals).
+  const sales = allSales.filter(s => (s as any).payment_status !== "PENDING");
 
   const today = new Date();
   const monthStart = startOfMonth(today);
@@ -20,6 +24,7 @@ export default function Reports() {
   const paymentTotals = { Cash: 0, Mpesa: 0, Credit: 0 };
   sales.forEach(s => { paymentTotals[s.payment_mode] += s.final_amount; });
   purchases.forEach(p => { paymentTotals[p.payment_mode] += p.total_cost; });
+
 
   return (
     <div className="space-y-6">

@@ -1,7 +1,6 @@
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Printer, X } from "lucide-react";
-import logo from "@/assets/logo.jpg";
 
 interface ReceiptData {
   id: string;
@@ -15,6 +14,9 @@ interface ReceiptData {
   paymentMode: string;
   profit: number;
   loyaltyPoints: number;
+  totalLoyaltyPoints?: number;
+  mpesaReceipt?: string | null;
+  cashierName?: string | null;
   date: string;
 }
 
@@ -23,91 +25,130 @@ interface SaleReceiptProps {
   onClose: () => void;
 }
 
+/**
+ * 80mm thermal receipt. No logo, no dashboard chrome — just the receipt.
+ * The print window contains ONLY the receipt HTML so nothing else is
+ * pushed to the printer, and page size is fixed to 80mm to prevent
+ * extra blank pages.
+ */
 export default function SaleReceipt({ data, onClose }: SaleReceiptProps) {
   const handlePrint = () => {
     const printContent = document.getElementById("receipt-content");
     if (!printContent) return;
-    const win = window.open("", "_blank", "width=300,height=600");
+    const win = window.open("", "_blank", "width=320,height=600");
     if (!win) return;
-    win.document.write(`
-      <html><head><title>Receipt</title>
+    win.document.write(`<!doctype html><html><head><title>Receipt</title>
       <style>
-        body { font-family: monospace; font-size: 12px; width: 280px; margin: 0 auto; padding: 10px; }
+        @page { size: 80mm auto; margin: 0; }
+        html, body { margin: 0; padding: 0; }
+        body { font-family: 'Courier New', monospace; font-size: 12px;
+               width: 72mm; margin: 0 auto; padding: 2mm 2mm 4mm; color: #000; }
         .center { text-align: center; }
-        .bold { font-weight: bold; }
-        .line { border-top: 1px dashed #000; margin: 6px 0; }
-        .row { display: flex; justify-content: space-between; }
-        .logo { width: 60px; height: 60px; border-radius: 8px; display: block; margin: 0 auto 4px; }
-        @media print { body { width: 100%; } }
+        .bold { font-weight: 700; }
+        .line { border-top: 1px dashed #000; margin: 4px 0; }
+        .row { display: flex; justify-content: space-between; gap: 6px; }
+        .sm { font-size: 11px; }
+        .lg { font-size: 14px; }
+        h1,h2,h3,p { margin: 0; padding: 0; }
+        @media print { body { width: 72mm; } }
       </style></head><body>
       ${printContent.innerHTML}
-      <script>window.print();window.close();<\/script>
-      </body></html>
-    `);
+      <script>window.onload=function(){window.print();setTimeout(function(){window.close();},300);};<\/script>
+      </body></html>`);
     win.document.close();
   };
 
   return (
     <div className="space-y-4">
-      <div id="receipt-content" className="font-mono text-xs space-y-2 bg-background p-4 rounded-lg border">
-        <div className="text-center">
-          <img src={logo} alt="Logo" className="w-14 h-14 rounded-lg mx-auto mb-1 object-cover" />
-          <p className="font-bold text-sm">WONDER AQUA LTD</p>
-          <p className="text-muted-foreground">Water Distribution</p>
-          <div className="border-t border-dashed border-foreground/30 my-2" />
+      <div
+        id="receipt-content"
+        className="font-mono text-xs bg-background p-3 rounded-lg border max-w-[300px] mx-auto"
+      >
+        <div className="center bold lg">WONDER AQUA LTD</div>
+        <div className="center sm">Water Distribution</div>
+        <div className="line" />
+
+        <div className="row sm">
+          <span>Receipt</span>
+          <span>#{data.id.slice(0, 8).toUpperCase()}</span>
         </div>
-
-        <div className="text-center text-muted-foreground">
-          <p>Receipt #{data.id.slice(0, 8).toUpperCase()}</p>
-          <p>{format(new Date(data.date), "dd MMM yyyy, HH:mm")}</p>
+        <div className="row sm">
+          <span>Date</span>
+          <span>{format(new Date(data.date), "dd/MM/yy HH:mm")}</span>
         </div>
-
-        <div className="border-t border-dashed border-foreground/30 my-2" />
-
-        <p><span className="text-muted-foreground">Customer:</span> {data.customerName}</p>
-
-        <div className="border-t border-dashed border-foreground/30 my-2" />
-
-        <div className="flex justify-between font-bold">
-          <span>Item</span><span>Amount</span>
-        </div>
-        <div className="flex justify-between">
-          <span>{data.productName} × {data.quantity}</span>
-          <span>KSh {data.totalAmount.toLocaleString()}</span>
-        </div>
-
-        {data.discountAmount > 0 && (
-          <div className="flex justify-between text-destructive">
-            <span>Discount</span>
-            <span>-KSh {data.discountAmount.toLocaleString()}</span>
+        {data.cashierName && (
+          <div className="row sm">
+            <span>Cashier</span>
+            <span>{data.cashierName}</span>
+          </div>
+        )}
+        {data.customerName && data.customerName !== "Walk-in" && (
+          <div className="row sm">
+            <span>Customer</span>
+            <span>{data.customerName}</span>
           </div>
         )}
 
-        <div className="border-t border-dashed border-foreground/30 my-2" />
+        <div className="line" />
 
-        <div className="flex justify-between font-bold text-sm">
+        <div className="row bold">
+          <span>Item</span>
+          <span>Amount</span>
+        </div>
+        <div className="row">
+          <span>
+            {data.productName} x{data.quantity}
+          </span>
+          <span>{data.totalAmount.toLocaleString()}</span>
+        </div>
+        <div className="row sm">
+          <span>@ {data.sellingPrice.toLocaleString()}</span>
+          <span />
+        </div>
+
+        {data.discountAmount > 0 && (
+          <div className="row">
+            <span>Discount</span>
+            <span>-{data.discountAmount.toLocaleString()}</span>
+          </div>
+        )}
+
+        <div className="line" />
+
+        <div className="row bold lg">
           <span>TOTAL</span>
           <span>KSh {data.finalAmount.toLocaleString()}</span>
         </div>
 
-        <div className="flex justify-between">
+        <div className="row">
           <span>Payment</span>
           <span>{data.paymentMode}</span>
         </div>
-
-        {data.loyaltyPoints > 0 && (
-          <div className="flex justify-between text-primary">
-            <span>Loyalty Points Earned</span>
-            <span>+{data.loyaltyPoints}</span>
+        {data.mpesaReceipt && (
+          <div className="row sm">
+            <span>M-Pesa</span>
+            <span>{data.mpesaReceipt}</span>
           </div>
         )}
 
-        <div className="border-t border-dashed border-foreground/30 my-2" />
+        {data.loyaltyPoints > 0 && (
+          <>
+            <div className="line" />
+            <div className="row sm">
+              <span>Points earned</span>
+              <span>+{data.loyaltyPoints}</span>
+            </div>
+            {typeof data.totalLoyaltyPoints === "number" && (
+              <div className="row sm">
+                <span>Points balance</span>
+                <span>{data.totalLoyaltyPoints}</span>
+              </div>
+            )}
+          </>
+        )}
 
-        <div className="text-center text-muted-foreground">
-          <p>Thank you for your business!</p>
-          <p>Wonder Aqua LTD</p>
-        </div>
+        <div className="line" />
+        <div className="center sm">Thank you for your business!</div>
       </div>
 
       <div className="flex gap-2">
