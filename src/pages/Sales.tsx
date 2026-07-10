@@ -244,9 +244,17 @@ export default function Sales() {
       return;
     }
     if (form.paymentMode === "Mpesa" && !mpesaPhone.trim()) {
-      toast.error("Enter customer phone number for STK push");
+      toast.error("Enter customer phone number");
       return;
     }
+    if (form.paymentMode === "Mpesa" && form.mpesaEntryMode === "manual") {
+      const code = form.mpesaCode.trim().toUpperCase();
+      if (!/^[A-Z0-9]{10}$/.test(code)) {
+        toast.error("Enter a valid 10-character M-Pesa transaction code.");
+        return;
+      }
+    }
+
 
     setIsSubmitting(true);
     try {
