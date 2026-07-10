@@ -50,7 +50,12 @@ export default function Sales() {
     discountType: "fixed" as DiscountType,
     discountValue: 0,
     paymentMode: "Cash" as PaymentMode,
+    // Mpesa sub-mode. "stk" = automatic STK push, "manual" = cashier
+    // records the M-Pesa transaction code from customer's SMS.
+    mpesaEntryMode: "stk" as "stk" | "manual",
+    mpesaCode: "",
   });
+
 
   const selectedProduct = products.find(p => p.id === form.productId);
   const selectedCustomer = customers.find(c => c.id === form.customerId);
