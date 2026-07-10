@@ -179,6 +179,9 @@ export default function Customers() {
     } finally {
       setPaySubmitting(false);
     }
+  };
+
+
 
 
   const customerSales = useMemo(() => {
