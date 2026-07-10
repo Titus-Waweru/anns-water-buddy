@@ -335,7 +335,8 @@ export default function Sales() {
 
       toast.success("Sale recorded successfully!");
       idempotencyKeyRef.current = null;
-      setForm({ customerId: "", productId: "", quantity: 1, discountType: "fixed", discountValue: 0, paymentMode: "Cash" });
+      setForm({ customerId: "", productId: "", quantity: 1, discountType: "fixed", discountValue: 0, paymentMode: "Cash", mpesaEntryMode: "stk", mpesaCode: "" });
+
       setMpesaPhone("");
       setOpen(false);
     } finally {
@@ -353,7 +354,7 @@ export default function Sales() {
     setStkStatus("idle");
     setManualMode(false);
     idempotencyKeyRef.current = null;
-    setForm({ customerId: "", productId: "", quantity: 1, discountType: "fixed", discountValue: 0, paymentMode: "Cash" });
+    setForm({ customerId: "", productId: "", quantity: 1, discountType: "fixed", discountValue: 0, paymentMode: "Cash", mpesaEntryMode: "stk", mpesaCode: "" });
     setMpesaPhone("");
   };
 
