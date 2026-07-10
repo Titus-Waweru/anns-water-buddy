@@ -298,15 +298,11 @@ Deno.serve(async (req) => {
       token_len: token.length,
     }));
 
-    // Co-op Enquiry/STK requires OperatorCode (same value used on STK Push).
-    // Its absence was the underlying cause of the 401 — Co-op's WAF rejects
-    // Enquiry requests that don't include the operator identifier.
-    const operatorCode = Deno.env.get("COOP_OPERATOR_CODE") || "";
-    const statusPayload = {
-      MessageReference: messageReference,
-      OperatorCode: operatorCode,
-      MessageDateTime: new Date().toISOString(),
-    };
+    // Official Co-op Postman body contains ONLY MessageReference. Do not
+    // add OperatorCode / MessageDateTime — extra fields cause the Enquiry
+    // endpoint to reject the request.
+    const statusPayload = { MessageReference: messageReference };
+
 
     const buildHeaders = (bearer: string) => ({
       Authorization: `Bearer ${bearer}`,
