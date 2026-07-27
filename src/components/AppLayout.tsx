@@ -2,7 +2,8 @@ import { Link, useLocation } from "react-router-dom";
 import { useState, useEffect } from "react";
 import {
   LayoutDashboard, Package, ShoppingCart, Truck, Users, Building, FileText, BarChart3, Menu, X, LogOut,
-  DollarSign, Wrench, Receipt, Factory, Target, ShieldAlert, Timer, AlertTriangle, GitBranch, Activity,
+  DollarSign, Wrench, Receipt, Factory, Target, ShieldAlert, Timer, AlertTriangle, GitBranch, Activity, FlaskConical, ArrowRightLeft, Megaphone,
+
 } from "lucide-react";
 
 import { useAuth } from "@/context/AuthContext";
@@ -34,13 +35,17 @@ const allNavItems: NavItem[] = [
   { title: "Transactions", path: "/app/transactions", icon: FileText, roles: ["superadmin", "supervisor"] },
   { title: "Reports", path: "/app/reports", icon: BarChart3, roles: ["superadmin", "supervisor"] },
   { title: "Cash Submission", path: "/app/cash-submission", icon: DollarSign, roles: ["superadmin", "supervisor", "cashier"] },
+  { title: "M-Banking Reconciliation", path: "/app/cash-reconciliation", icon: DollarSign, roles: ["superadmin", "supervisor", "cashier"] },
+  { title: "Raw Bottles", path: "/app/raw-bottles", icon: FlaskConical, roles: ["superadmin", "supervisor", "stock_manager"] },
   { title: "Production", path: "/app/production", icon: Factory, roles: ["superadmin", "supervisor", "stock_manager"] },
+  { title: "Stock Transfer", path: "/app/stock-transfer", icon: ArrowRightLeft, roles: ["superadmin", "supervisor", "stock_manager"] },
+  { title: "Announcements", path: "/app/announcements", icon: Megaphone, roles: [] },
   { title: "Targets", path: "/app/targets", icon: Target, roles: ["superadmin", "supervisor"] },
   { title: "Assets", path: "/app/assets", icon: Wrench, roles: ["superadmin", "supervisor"] },
   { title: "Vouchers", path: "/app/vouchers", icon: Receipt, roles: ["superadmin", "supervisor"] },
   { title: "Teams", path: "/app/teams", icon: Users, roles: ["superadmin", "supervisor"] },
   { title: "Branches", path: "/app/branches", icon: Building, roles: ["superadmin", "supervisor"] },
-  { title: "Payments Trace", path: "/app/payments-trace", icon: Activity, roles: ["superadmin", "supervisor"] },
+  { title: "Payments Trace", path: "/app/payments-trace", icon: Activity, roles: ["superadmin"] },
   { title: "System Control", path: "/app/system-control", icon: ShieldAlert, roles: ["superadmin"] },
   { title: "Subscription", path: "/app/subscription", icon: Timer, roles: ["superadmin"] },
 

@@ -9,6 +9,8 @@ type DbProduct = Database["public"]["Tables"]["products"]["Row"];
 type DbCustomer = Database["public"]["Tables"]["customers"]["Row"];
 type DbSupplier = Database["public"]["Tables"]["suppliers"]["Row"];
 type DbSale = Database["public"]["Tables"]["sales"]["Row"];
+type DbSaleItem = Database["public"]["Tables"]["sale_items"]["Row"];
+type DbSaleItemInsert = Database["public"]["Tables"]["sale_items"]["Insert"];
 type DbPurchase = Database["public"]["Tables"]["purchases"]["Row"];
 type DbInventoryLog = Database["public"]["Tables"]["inventory_logs"]["Row"];
 
@@ -47,6 +49,8 @@ interface DataContextType {
   deleteSupplier: (id: string) => Promise<void>;
 
   addSale: (s: Database["public"]["Tables"]["sales"]["Insert"]) => Promise<void>;
+  addCartSale: (s: Database["public"]["Tables"]["sales"]["Insert"] & { items: DbSaleItemInsert[] }) => Promise<void>;
+  finalizeSale: (saleId: string) => Promise<void>;
   addPurchase: (p: Database["public"]["Tables"]["purchases"]["Insert"]) => Promise<void>;
 
   refetch: () => void;
@@ -113,9 +117,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
     try {
       const result = await fetchWithTimeout(async () => {
-        let prodQ = supabase.from("products").select("*").order("created_at", { ascending: false });
-        let custQ = supabase.from("customers").select("*").order("created_at", { ascending: false });
-        let suppQ = supabase.from("suppliers").select("*").order("created_at", { ascending: false });
+        let prodQ = supabase.from("products").select("*").order("name");
+        let custQ = supabase.from("customers").select("*").order("name");
+        let suppQ = supabase.from("suppliers").select("*").order("name");
         let saleQ = supabase.from("sales").select("*").order("date", { ascending: false });
         let purchQ = supabase.from("purchases").select("*").order("date", { ascending: false });
         let logQ = supabase.from("inventory_logs").select("*").order("date", { ascending: false });
@@ -265,6 +269,125 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     fetchAll();
   }, [fetchAll, products, customers, effectiveBranchId, user]);
 
+  const finalizeSale = useCallback(async (saleId: string) => {
+    const { data: sale } = await supabase.from("sales").select("*").eq("id", saleId).maybeSingle();
+    if (!sale) return;
+
+    const { data: items } = await supabase.from("sale_items").select("*").eq("sale_id", saleId);
+    if (items && items.length > 0) {
+      for (const item of items) {
+        const product = products.find(p => p.id === item.product_id);
+        if (product) {
+          await supabase.from("products").update({ quantity: Math.max(0, product.quantity - item.quantity) }).eq("id", item.product_id);
+        }
+        await supabase.from("inventory_logs").insert({
+          product_id: item.product_id,
+          product_name: item.product_name,
+          type: "OUT",
+          quantity: item.quantity,
+          reference: `Sale to ${sale.customer_name || "Walk-in"}`,
+          date: sale.date,
+          branch_id: sale.branch_id || effectiveBranchId,
+        });
+      }
+    } else {
+      const product = products.find(p => p.id === sale.product_id);
+      if (product) {
+        await supabase.from("products").update({ quantity: Math.max(0, product.quantity - sale.quantity) }).eq("id", sale.product_id);
+      }
+      await supabase.from("inventory_logs").insert({
+        product_id: sale.product_id,
+        product_name: sale.product_name,
+        type: "OUT",
+        quantity: sale.quantity,
+        reference: `Sale to ${sale.customer_name || "Walk-in"}`,
+        date: sale.date,
+        branch_id: sale.branch_id || effectiveBranchId,
+      });
+    }
+
+    if (sale.payment_mode === "Credit" && sale.customer_id) {
+      const cust = customers.find(c => c.id === sale.customer_id);
+      if (cust) {
+        await supabase.from("customers").update({
+          credit_balance: cust.credit_balance + sale.final_amount,
+        }).eq("id", sale.customer_id);
+      }
+    }
+
+    fetchAll();
+  }, [fetchAll, products, customers, effectiveBranchId]);
+
+  const addCartSale = useCallback(async (payload: Database["public"]["Tables"]["sales"]["Insert"] & { items: DbSaleItemInsert[] }) => {
+    if (!navigator.onLine) {
+      toast.error("Multi-item checkout requires an online connection. Please reconnect and try again.");
+      throw new Error("Offline multi-item checkout unsupported");
+    }
+
+    // Ensure Mpesa-initiated cart sales are created PENDING unless caller explicitly set otherwise.
+    // This guards against the DB default of 'PAID' (for backward compat) accidentally finalizing
+    // a sale before an STK push is sent.
+    const { items, ...saleHeader } = payload as any;
+    if (saleHeader?.payment_mode === "Mpesa" && typeof saleHeader.payment_status === "undefined") {
+      saleHeader.payment_status = "PENDING";
+    }
+    const saleWithBranch = { ...saleHeader, branch_id: saleHeader.branch_id || effectiveBranchId, recorded_by: saleHeader.recorded_by || user?.id };
+    const { data: saleData, error: saleErr } = await supabase.from("sales").insert(saleWithBranch).select().single();
+    if (saleErr || !saleData) {
+      // Handle idempotency conflict: if a previous attempt already created the sale
+      // with the same `idempotency_key`, return that existing sale instead of throwing.
+      if ((saleErr as any)?.code === "23505" && saleWithBranch.idempotency_key) {
+        const { data: existing } = await supabase.from("sales").select().eq("idempotency_key", saleWithBranch.idempotency_key).maybeSingle();
+        if (existing) {
+          fetchAll();
+          return existing as any;
+        }
+      }
+      throw saleErr || new Error("Failed to create sale");
+    }
+
+    const itemsToInsert = items.map(item => ({
+      ...item,
+      sale_id: saleData.id,
+      branch_id: saleData.branch_id,
+    }));
+    const { error: itemsErr } = await supabase.from("sale_items").insert(itemsToInsert);
+    if (itemsErr) throw itemsErr;
+
+    if (saleData.payment_status !== "PENDING") {
+      if (saleData.payment_mode === "Mpesa") {
+        console.warn("Cart sale created with non-pending payment_status for Mpesa:", saleData.id, saleData.payment_status);
+      }
+      for (const item of items) {
+        const product = products.find(p => p.id === item.product_id);
+        if (product) {
+          await supabase.from("products").update({ quantity: Math.max(0, product.quantity - item.quantity) }).eq("id", item.product_id);
+        }
+        await supabase.from("inventory_logs").insert({
+          product_id: item.product_id,
+          product_name: item.product_name,
+          type: "OUT",
+          quantity: item.quantity,
+          reference: `Sale to ${saleWithBranch.customer_name || "Walk-in"}`,
+          date: saleWithBranch.date || new Date().toISOString(),
+          branch_id: saleData.branch_id || effectiveBranchId,
+        });
+      }
+
+      if (saleData.payment_mode === "Credit" && saleData.customer_id) {
+        const cust = customers.find(c => c.id === saleData.customer_id);
+        if (cust) {
+          await supabase.from("customers").update({
+            credit_balance: cust.credit_balance + saleData.final_amount,
+          }).eq("id", saleData.customer_id);
+        }
+      }
+    }
+
+    fetchAll();
+    return saleData;
+  }, [fetchAll, products, customers, effectiveBranchId, user]);
+
   const addPurchase = useCallback(async (p: Database["public"]["Tables"]["purchases"]["Insert"]) => {
     const purchaseWithBranch = { ...p, branch_id: p.branch_id || effectiveBranchId, recorded_by: p.recorded_by || user?.id };
     const { error } = await supabase.from("purchases").insert(purchaseWithBranch);
@@ -301,6 +424,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       addCustomer, updateCustomer, deleteCustomer,
       addSupplier, updateSupplier, deleteSupplier,
       addSale, addPurchase, refetch: fetchAll,
+      addCartSale, finalizeSale,
     }}>
       {children}
     </DataContext.Provider>

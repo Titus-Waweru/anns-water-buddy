@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { Plus, Receipt, Loader2 } from "lucide-react";
+import PurchaseVoucherPrint from "@/components/PurchaseVoucherPrint";
 
 interface Voucher {
   id: string;
@@ -146,9 +147,23 @@ export default function VouchersPage() {
                     <p className="text-xs text-muted-foreground">{v.voucher_number} · {format(new Date(v.date), "dd MMM yyyy")}</p>
                     {v.notes && <p className="text-xs text-muted-foreground italic mt-1">{v.notes}</p>}
                   </div>
-                  <div className="text-right">
-                    <p className="font-bold text-foreground">KSh {Number(v.amount).toLocaleString()}</p>
-                    <Badge variant="outline" className="capitalize text-[10px]">{v.category}</Badge>
+                  <div className="flex items-center gap-2">
+                    <PurchaseVoucherPrint
+                      type="voucher"
+                      data={{
+                        id: v.id,
+                        voucher_number: v.voucher_number,
+                        purpose: v.purpose,
+                        category: v.category,
+                        amount: Number(v.amount),
+                        date: v.date,
+                        notes: v.notes || undefined,
+                      }}
+                    />
+                    <div className="text-right">
+                      <p className="font-bold text-foreground">KSh {Number(v.amount).toLocaleString()}</p>
+                      <Badge variant="outline" className="capitalize text-[10px]">{v.category}</Badge>
+                    </div>
                   </div>
                 </div>
               </CardContent>

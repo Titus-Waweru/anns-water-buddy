@@ -15,6 +15,7 @@
 // payment records. It reuses the existing PENDING row keyed by message_reference.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { finalizePaymentCompletion } from "../../../api/lib/payment-finalizer.js";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -411,10 +412,12 @@ Deno.serve(async (req) => {
 
     await admin.from("payments").update(update).eq("id", payment.id);
 
-    if (status === "SUCCESS" && payment.sale_id) {
-      await admin.from("sales").update({ payment_status: "PAID" }).eq("id", payment.sale_id);
-    } else if ((status === "FAILED" || status === "CANCELLED") && payment.sale_id) {
-      await admin.from("sales").update({ payment_status: status }).eq("id", payment.sale_id);
+    if (payment.sale_id) {
+      try {
+        await finalizePaymentCompletion({ supabase: admin, saleId: payment.sale_id, paymentStatus: status === "SUCCESS" ? "PAID" : status });
+      } catch (finalizeError) {
+        console.error(JSON.stringify({ evt: "transaction_status_finalize_error", correlationId, sale_id: payment.sale_id, message: String(finalizeError) }));
+      }
     }
 
     console.log(JSON.stringify({

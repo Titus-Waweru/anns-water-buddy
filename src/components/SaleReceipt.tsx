@@ -2,6 +2,13 @@ import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Printer, X } from "lucide-react";
 
+interface CartItemReceipt {
+  productName: string;
+  quantity: number;
+  sellingPrice: number;
+  subtotal: number;
+}
+
 interface ReceiptData {
   id: string;
   customerName: string;
@@ -17,6 +24,11 @@ interface ReceiptData {
   totalLoyaltyPoints?: number;
   mpesaReceipt?: string | null;
   cashierName?: string | null;
+  branchName?: string | null;
+  items?: CartItemReceipt[];
+  totalCost?: number;
+  expectedProfit?: number;
+  loyaltyPointsEarned?: number;
   date: string;
 }
 
@@ -32,6 +44,8 @@ interface SaleReceiptProps {
  * extra blank pages.
  */
 export default function SaleReceipt({ data, onClose }: SaleReceiptProps) {
+  const hasItems = data.items && data.items.length > 0;
+
   const handlePrint = () => {
     const printContent = document.getElementById("receipt-content");
     if (!printContent) return;
@@ -65,7 +79,8 @@ export default function SaleReceipt({ data, onClose }: SaleReceiptProps) {
         className="font-mono text-xs bg-background p-3 rounded-lg border max-w-[300px] mx-auto"
       >
         <div className="center bold lg">WONDER AQUA LTD</div>
-        <div className="center sm">Water Distribution</div>
+        <div className="center sm">P.O BOX 455-00520 RUAI</div>
+        <div className="center sm">Tel: 0715670632</div>
         <div className="line" />
 
         <div className="row sm">
@@ -78,8 +93,14 @@ export default function SaleReceipt({ data, onClose }: SaleReceiptProps) {
         </div>
         {data.cashierName && (
           <div className="row sm">
-            <span>Cashier</span>
+            <span>Served By</span>
             <span>{data.cashierName}</span>
+          </div>
+        )}
+        {data.branchName && (
+          <div className="row sm">
+            <span>Branch</span>
+            <span>{data.branchName}</span>
           </div>
         )}
         {data.customerName && data.customerName !== "Walk-in" && (
@@ -91,21 +112,46 @@ export default function SaleReceipt({ data, onClose }: SaleReceiptProps) {
 
         <div className="line" />
 
-        <div className="row bold">
-          <span>Item</span>
-          <span>Amount</span>
-        </div>
+        {hasItems ? (
+          <>
+            {data.items!.map((item, idx) => (
+              <div key={idx}>
+                <div className="row">
+                  <span>{item.productName} x{item.quantity}</span>
+                  <span>{item.subtotal.toLocaleString()}</span>
+                </div>
+                <div className="row sm">
+                  <span>@ {item.sellingPrice.toLocaleString()}</span>
+                  <span />
+                </div>
+              </div>
+            ))}
+          </>
+        ) : (
+          <>
+            <div className="row bold">
+              <span>Item</span>
+              <span>Amount</span>
+            </div>
+            <div className="row">
+              <span>
+                {data.productName} x{data.quantity}
+              </span>
+              <span>{data.totalAmount.toLocaleString()}</span>
+            </div>
+            <div className="row sm">
+              <span>@ {data.sellingPrice.toLocaleString()}</span>
+              <span />
+            </div>
+          </>
+        )}
+
+        <div className="line" />
+
         <div className="row">
-          <span>
-            {data.productName} x{data.quantity}
-          </span>
+          <span>Subtotal</span>
           <span>{data.totalAmount.toLocaleString()}</span>
         </div>
-        <div className="row sm">
-          <span>@ {data.sellingPrice.toLocaleString()}</span>
-          <span />
-        </div>
-
         {data.discountAmount > 0 && (
           <div className="row">
             <span>Discount</span>
@@ -113,12 +159,25 @@ export default function SaleReceipt({ data, onClose }: SaleReceiptProps) {
           </div>
         )}
 
-        <div className="line" />
-
         <div className="row bold lg">
           <span>TOTAL</span>
           <span>KSh {data.finalAmount.toLocaleString()}</span>
         </div>
+
+        {data.totalCost !== undefined && (
+          <div className="row sm">
+            <span>Total Cost</span>
+            <span>{data.totalCost.toLocaleString()}</span>
+          </div>
+        )}
+        {data.expectedProfit !== undefined && (
+          <div className="row sm">
+            <span>Expected Profit</span>
+            <span>{data.expectedProfit.toLocaleString()}</span>
+          </div>
+        )}
+
+        <div className="line" />
 
         <div className="row">
           <span>Payment</span>
@@ -126,29 +185,49 @@ export default function SaleReceipt({ data, onClose }: SaleReceiptProps) {
         </div>
         {data.mpesaReceipt && (
           <div className="row sm">
-            <span>M-Pesa</span>
+            <span>M-Pesa Code</span>
             <span>{data.mpesaReceipt}</span>
           </div>
         )}
 
-        {data.loyaltyPoints > 0 && (
+        {(data.loyaltyPointsEarned !== undefined && data.loyaltyPointsEarned > 0) || (typeof data.totalLoyaltyPoints === "number") ? (
           <>
             <div className="line" />
-            <div className="row sm">
-              <span>Points earned</span>
-              <span>+{data.loyaltyPoints}</span>
-            </div>
+            {data.loyaltyPointsEarned !== undefined && data.loyaltyPointsEarned > 0 && (
+              <div className="row sm">
+                <span>Points Earned</span>
+                <span>+{data.loyaltyPointsEarned}</span>
+              </div>
+            )}
             {typeof data.totalLoyaltyPoints === "number" && (
               <div className="row sm">
-                <span>Points balance</span>
+                <span>Loyalty Balance</span>
                 <span>{data.totalLoyaltyPoints}</span>
               </div>
             )}
           </>
+        ) : (
+          data.loyaltyPoints > 0 && (
+            <>
+              <div className="line" />
+              <div className="row sm">
+                <span>Points earned</span>
+                <span>+{data.loyaltyPoints}</span>
+              </div>
+              {typeof data.totalLoyaltyPoints === "number" && (
+                <div className="row sm">
+                  <span>Points balance</span>
+                  <span>{data.totalLoyaltyPoints}</span>
+                </div>
+              )}
+            </>
+          )
         )}
 
         <div className="line" />
-        <div className="center sm">Thank you for your business!</div>
+        <div className="center sm bold">Thank you for supporting</div>
+        <div className="center sm bold">Wonder Aqua Ltd.</div>
+        <div className="center sm">Activated Spirit In You</div>
       </div>
 
       <div className="flex gap-2">

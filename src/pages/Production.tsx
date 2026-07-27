@@ -6,15 +6,44 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Textarea } from "@/components/ui/textarea";
-import { Factory, Package, AlertTriangle, CheckCircle, TrendingUp, BarChart3, Save } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Factory, FlaskConical, Package, AlertTriangle, CheckCircle, Loader2, Save } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+
+interface BottleSpec {
+  id: string;
+  category: string;
+  bottle_size: string;
+  display_name: string;
+  bottles_per_bale: number;
+  is_active: boolean;
+}
+
+interface RawInventory {
+  id: string;
+  specification_id: string;
+  branch_id: string | null;
+  quantity: number;
+  average_cost: number;
+}
+
+interface Product {
+  id: string;
+  name: string;
+  bottle_size: string;
+  quantity: number;
+  packs: number;
+  bales: number;
+  faulty_bottles: number;
+  branch_id: string | null;
+}
 
 interface ProductionRecord {
   id: string;
   production_date: string;
+  specification_id: string | null;
+  product_id: string | null;
   bales: number;
   total_bottles: number;
   faulty_bottles: number;
@@ -30,106 +59,133 @@ interface ProductionRecord {
   created_at: string;
 }
 
+interface Branch {
+  id: string;
+  name: string;
+  is_active: boolean;
+}
+
 export default function Production() {
   const { hasRole, isAdmin, user, branchId } = useAuth();
   const canAccess = isAdmin || hasRole("stock_manager");
 
-  const [bales, setBales] = useState(0);
-  const [faultyBottles, setFaultyBottles] = useState(0);
-  const [economyAllocation, setEconomyAllocation] = useState(50);
-  const [notes, setNotes] = useState("");
-  const [economyPrice, setEconomyPrice] = useState(10);
-  const [executivePrice, setExecutivePrice] = useState(20);
-  const [saving, setSaving] = useState(false);
+  // Data
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [specs, setSpecs] = useState<BottleSpec[]>([]);
+  const [inventory, setInventory] = useState<RawInventory[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [records, setRecords] = useState<ProductionRecord[]>([]);
 
-  const bottlesPerBale = 90;
-  const bottlesPerPack = 12;
+  // Form state
+  const [selectedBranchId, setSelectedBranchId] = useState("");
+  const [selectedSpecId, setSelectedSpecId] = useState("");
+  const [selectedProductId, setSelectedProductId] = useState("");
+  const [quantityProcessed, setQuantityProcessed] = useState(0);
+  const [faultyBottles, setFaultyBottles] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  const totalBottles = bales * bottlesPerBale;
-  const goodBottles = Math.max(0, totalBottles - faultyBottles);
-  const economyBottles = Math.floor(goodBottles * (economyAllocation / 100));
-  const executiveBottles = goodBottles - economyBottles;
-  const economyPacks = Math.floor(economyBottles / bottlesPerPack);
-  const executivePacks = Math.floor(executiveBottles / bottlesPerPack);
-  const looseBottles = (economyBottles % bottlesPerPack) + (executiveBottles % bottlesPerPack);
-  const expectedRevenue = (economyBottles * economyPrice) + (executiveBottles * executivePrice);
+  // Derived values
+  const selectedSpec = specs.find(s => s.id === selectedSpecId);
+  const selectedProduct = products.find(p => p.id === selectedProductId);
+  const goodBottles = Math.max(0, quantityProcessed - faultyBottles);
 
-  const fetchRecords = useCallback(async () => {
-    let q = supabase.from("production_records").select("*").order("production_date", { ascending: false }).limit(50);
-    if (!isAdmin && branchId) q = q.eq("branch_id", branchId);
-    const { data } = await q;
-    if (data) setRecords(data as ProductionRecord[]);
-  }, [isAdmin, branchId]);
+  // Find matching inventory record for selected spec + branch
+  const invRecord = inventory.find(
+    i => i.specification_id === selectedSpecId && i.branch_id === selectedBranchId
+  );
+  const availableQty = invRecord?.quantity || 0;
+  const isSufficient = selectedSpecId && selectedBranchId ? quantityProcessed <= availableQty : true;
 
-  // Fetch pricing config
+  // Filter products that match the selected bottle spec by display_name
+  const matchingProducts = selectedSpec
+    ? products.filter(p => p.name === selectedSpec.display_name)
+    : [];
+
+  // Fetch all data
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    const [branchRes, specRes, invRes, prodRes, recRes] = await Promise.all([
+      (supabase as any).from("branches").select("*").eq("is_active", true).order("name"),
+      (supabase as any).from("bottle_specifications").select("*").eq("is_active", true).order("category").order("bottle_size"),
+      (supabase as any).from("raw_bottle_inventory").select("*"),
+      (supabase as any).from("products").select("*").order("name"),
+      (supabase as any).from("production_records").select("*").order("production_date", { ascending: false }).limit(50),
+    ]);
+    if (branchRes.data) {
+      // Filter to Factory/Main Branch only for production
+      const productionBranches = (branchRes.data as Branch[]).filter(
+        b => b.name.toLowerCase().includes("factory") || b.name.toLowerCase().includes("main")
+      );
+      setBranches(productionBranches);
+    }
+    if (specRes.data) setSpecs(specRes.data as BottleSpec[]);
+    if (invRes.data) setInventory(invRes.data as RawInventory[]);
+    if (prodRes.data) setProducts(prodRes.data as Product[]);
+    if (recRes.data) setRecords(recRes.data as ProductionRecord[]);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Auto-select product when spec changes
   useEffect(() => {
-    if (!canAccess) return;
-    fetchRecords();
-    supabase.from("system_settings").select("*").in("setting_key", ["economy_bottle_price", "executive_bottle_price"]).then(({ data }) => {
-      data?.forEach(s => {
-        if (s.setting_key === "economy_bottle_price") setEconomyPrice(Number(s.setting_value) || 10);
-        if (s.setting_key === "executive_bottle_price") setExecutivePrice(Number(s.setting_value) || 20);
-      });
-    });
-  }, [canAccess, fetchRecords]);
+    if (matchingProducts.length === 1) {
+      setSelectedProductId(matchingProducts[0].id);
+    } else {
+      setSelectedProductId("");
+    }
+  }, [selectedSpecId, products]);
 
   const handleSave = async () => {
-    if (bales <= 0) { toast.error("Enter number of bales"); return; }
+    // Validations
+    if (!selectedBranchId) { toast.error("Select a branch"); return; }
+    if (!selectedSpecId) { toast.error("Select a bottle specification"); return; }
+    if (!selectedProductId) { toast.error("Select the matching finished product"); return; }
+    if (quantityProcessed <= 0) { toast.error("Enter quantity processed"); return; }
+    if (faultyBottles < 0) { toast.error("Faulty bottles cannot be negative"); return; }
+    if (faultyBottles > quantityProcessed) { toast.error("Faulty bottles cannot exceed processed quantity"); return; }
+    if (!isSufficient) {
+      toast.error(`Insufficient raw inventory. Available: ${availableQty}, Required: ${quantityProcessed}`);
+      return;
+    }
+
     setSaving(true);
-    const { error } = await supabase.from("production_records").insert({
-      production_date: new Date().toISOString().split("T")[0],
-      bales,
-      total_bottles: totalBottles,
-      faulty_bottles: faultyBottles,
-      good_bottles: goodBottles,
-      economy_bottles: economyBottles,
-      executive_bottles: executiveBottles,
-      economy_packs: economyPacks,
-      executive_packs: executivePacks,
-      loose_bottles: looseBottles,
-      economy_allocation: economyAllocation,
-      expected_revenue: expectedRevenue,
-      branch_id: branchId,
-      recorded_by: user!.id,
-      notes: notes || null,
-    });
-    if (error) { toast.error("Failed to save: " + error.message); }
-    else {
-      toast.success("Production record saved!");
-      setBales(0); setFaultyBottles(0); setNotes("");
-      fetchRecords();
+    try {
+      const specName = selectedSpec!.display_name;
+      const prodName = selectedProduct!.name;
+      const balesUsed = selectedSpec!.bottles_per_bale > 0
+        ? Math.floor(quantityProcessed / selectedSpec!.bottles_per_bale)
+        : 0;
+
+      // Execute all stock changes atomically via the database function
+      const { data: productionId, error: rpcErr } = await (supabase as any).rpc("process_production", {
+        p_specification_id: selectedSpecId,
+        p_product_id: selectedProductId,
+        p_branch_id: selectedBranchId,
+        p_quantity_processed: quantityProcessed,
+        p_faulty_bottles: faultyBottles,
+        p_good_bottles: goodBottles,
+        p_bales: balesUsed,
+        p_spec_name: specName,
+        p_prod_name: prodName,
+        p_recorded_by: user!.id,
+        p_notes: `Spec: ${specName}, Product: ${prodName}`,
+      });
+
+      if (rpcErr) throw new Error(rpcErr.message);
+
+      toast.success(`Production recorded: ${goodBottles} good bottles from ${quantityProcessed} processed`);
+      setSelectedSpecId("");
+      setSelectedProductId("");
+      setQuantityProcessed(0);
+      setFaultyBottles(0);
+      fetchData();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to save production record");
     }
     setSaving(false);
   };
-
-  const handleSavePricing = async () => {
-    const upsert = async (key: string, val: number) => {
-      const { data } = await supabase.from("system_settings").select("id").eq("setting_key", key).maybeSingle();
-      if (data) {
-        await supabase.from("system_settings").update({ setting_value: String(val), updated_by: user!.id }).eq("setting_key", key);
-      } else {
-        await supabase.from("system_settings").insert({ setting_key: key, setting_value: String(val), updated_by: user!.id });
-      }
-    };
-    await Promise.all([
-      upsert("economy_bottle_price", economyPrice),
-      upsert("executive_bottle_price", executivePrice),
-    ]);
-    toast.success("Pricing updated!");
-  };
-
-  // Analytics
-  const totalProduced = records.reduce((s, r) => s + r.total_bottles, 0);
-  const totalFaulty = records.reduce((s, r) => s + r.faulty_bottles, 0);
-  const totalGood = records.reduce((s, r) => s + r.good_bottles, 0);
-  const efficiencyRate = totalProduced > 0 ? ((totalGood / totalProduced) * 100).toFixed(1) : "0";
-
-  const chartData = records.slice(0, 10).reverse().map(r => ({
-    date: format(new Date(r.production_date), "dd MMM"),
-    Good: r.good_bottles,
-    Faulty: r.faulty_bottles,
-  }));
 
   if (!canAccess) {
     return <div className="p-6 text-center text-muted-foreground">You don't have permission to access Production.</div>;
@@ -141,164 +197,173 @@ export default function Production() {
         <Factory className="h-7 w-7 text-primary" />
         <div>
           <h1 className="text-2xl font-bold text-foreground">Production</h1>
-          <p className="text-sm text-muted-foreground">Bottling calculator with data persistence & analytics</p>
+          <p className="text-sm text-muted-foreground">Convert raw bottles into finished products</p>
         </div>
       </div>
 
-      {/* Analytics Summary */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Card><CardContent className="p-4 text-center">
-          <p className="text-2xl font-bold text-foreground">{totalProduced.toLocaleString()}</p>
-          <p className="text-xs text-muted-foreground">Total Produced</p>
-        </CardContent></Card>
-        <Card><CardContent className="p-4 text-center">
-          <p className="text-2xl font-bold text-success">{totalGood.toLocaleString()}</p>
-          <p className="text-xs text-muted-foreground">Good Bottles</p>
-        </CardContent></Card>
-        <Card><CardContent className="p-4 text-center">
-          <p className="text-2xl font-bold text-destructive">{totalFaulty.toLocaleString()}</p>
-          <p className="text-xs text-muted-foreground">Faulty/Rejected</p>
-        </CardContent></Card>
-        <Card><CardContent className="p-4 text-center">
-          <p className="text-2xl font-bold text-primary">{efficiencyRate}%</p>
-          <p className="text-xs text-muted-foreground">Efficiency Rate</p>
-        </CardContent></Card>
-      </div>
+      {loading ? (
+        <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+      ) : (
+        <div className="grid lg:grid-cols-2 gap-6">
+          {/* Production Form */}
+          <Card>
+            <CardHeader><CardTitle className="text-base">New Production Run</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+              {/* Branch Selection */}
+              <div>
+                <Label>Branch *</Label>
+                <Select value={selectedBranchId} onValueChange={setSelectedBranchId}>
+                  <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
+                  <SelectContent>
+                    {branches.map(b => (
+                      <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-      <div className="grid lg:grid-cols-2 gap-6">
-        {/* Input */}
-        <Card>
-          <CardHeader><CardTitle className="text-base">New Production Run</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <Label>Number of Bales Received</Label>
-              <Input type="number" min={0} value={bales || ""} onChange={e => setBales(Number(e.target.value))} placeholder="e.g. 10" />
-              <p className="text-xs text-muted-foreground mt-1">1 bale = {bottlesPerBale} bottles</p>
-            </div>
-            <div>
-              <Label>Faulty / Reject Bottles</Label>
-              <Input type="number" min={0} value={faultyBottles || ""} onChange={e => setFaultyBottles(Number(e.target.value))} placeholder="e.g. 5" />
-            </div>
-            <div>
-              <Label>Economy Allocation (%)</Label>
-              <Input type="number" min={0} max={100} value={economyAllocation} onChange={e => setEconomyAllocation(Math.min(100, Math.max(0, Number(e.target.value))))} />
-              <p className="text-xs text-muted-foreground mt-1">Remaining {100 - economyAllocation}% → Executive</p>
-            </div>
-            <div>
-              <Label>Notes (optional)</Label>
-              <Textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Any notes about this batch..." />
-            </div>
+              {/* Bottle Specification */}
+              <div>
+                <Label>Bottle Specification *</Label>
+                <Select value={selectedSpecId} onValueChange={v => { setSelectedSpecId(v); setSelectedProductId(""); }}>
+                  <SelectTrigger><SelectValue placeholder="Select specification" /></SelectTrigger>
+                  <SelectContent>
+                    {specs.map(s => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.display_name} ({s.bottles_per_bale} per bale)
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-            {bales > 0 && (
-              <Card className="bg-muted/50">
-                <CardContent className="p-3 space-y-2 text-sm">
-                  <div className="grid grid-cols-2 gap-2">
-                    <div><span className="text-muted-foreground">Total:</span> <strong>{totalBottles}</strong></div>
-                    <div><span className="text-muted-foreground">Good:</span> <strong className="text-success">{goodBottles}</strong></div>
-                  </div>
-                  {faultyBottles > 0 && (
-                    <div className="flex items-center gap-1 text-destructive text-xs">
-                      <AlertTriangle className="h-3 w-3" /> {faultyBottles} faulty excluded
+              {/* Finished Product */}
+              <div>
+                <Label>Finished Product *</Label>
+                <Select value={selectedProductId} onValueChange={setSelectedProductId} disabled={!selectedSpecId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder={selectedSpecId ? "Select matching product" : "Select a spec first"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {matchingProducts.map(p => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name} (Stock: {p.quantity})
+                      </SelectItem>
+                    ))}
+                    {selectedSpecId && matchingProducts.length === 0 && (
+                      <div className="px-2 py-1 text-xs text-muted-foreground">No matching products found</div>
+                    )}
+                  </SelectContent>
+                </Select>
+                {selectedSpecId && matchingProducts.length === 0 && (
+                  <p className="text-xs text-destructive mt-1">
+                    No finished product named "{selectedSpec?.display_name}" found. Create it in Inventory first.
+                  </p>
+                )}
+              </div>
+
+              {/* Quantity Processed */}
+              <div>
+                <Label>Quantity Processed (bottles) *</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={quantityProcessed || ""}
+                  onChange={e => setQuantityProcessed(Number(e.target.value))}
+                  placeholder="e.g. 900"
+                />
+              </div>
+
+              {/* Faulty / Broken Bottles */}
+              <div>
+                <Label>Faulty / Broken Bottles</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={faultyBottles || ""}
+                  onChange={e => setFaultyBottles(Number(e.target.value))}
+                  placeholder="e.g. 5"
+                />
+              </div>
+
+              {/* Summary */}
+              {quantityProcessed > 0 && (
+                <Card className="bg-muted/50">
+                  <CardContent className="p-3 space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span>Processed</span>
+                      <strong>{quantityProcessed.toLocaleString()}</strong>
                     </div>
+                    {faultyBottles > 0 && (
+                      <div className="flex justify-between text-destructive">
+                        <span>Faulty</span>
+                        <strong>-{faultyBottles.toLocaleString()}</strong>
+                      </div>
+                    )}
+                    <div className="flex justify-between font-bold text-success border-t pt-2">
+                      <span>Good Bottles</span>
+                      <strong>{goodBottles.toLocaleString()}</strong>
+                    </div>
+                    {selectedSpec && (
+                      <div className="flex justify-between text-xs text-muted-foreground border-t pt-2">
+                        <span>Bales consumed</span>
+                        <span>{Math.floor(quantityProcessed / selectedSpec.bottles_per_bale)}</span>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Inventory Validation */}
+              {selectedSpecId && selectedBranchId && quantityProcessed > 0 && (
+                <div className={`flex items-center gap-2 text-sm ${isSufficient ? "text-success" : "text-destructive"}`}>
+                  {isSufficient ? (
+                    <><CheckCircle className="h-4 w-4" /> Available: {availableQty.toLocaleString()} bottles</>
+                  ) : (
+                    <><AlertTriangle className="h-4 w-4" /> Insufficient! Available: {availableQty.toLocaleString()}, Required: {quantityProcessed.toLocaleString()}</>
                   )}
-                  <div className="border-t pt-2 space-y-1">
-                    <div className="flex justify-between"><span>Economy Packs</span><Badge variant="secondary">{economyPacks}</Badge></div>
-                    <div className="flex justify-between"><span>Executive Packs</span><Badge variant="secondary">{executivePacks}</Badge></div>
-                    <div className="flex justify-between"><span>Loose Bottles</span><Badge variant="outline">{looseBottles}</Badge></div>
-                  </div>
-                  <div className="border-t pt-2 font-semibold flex justify-between">
-                    <span>Expected Revenue</span>
-                    <span className="text-success">KSh {expectedRevenue.toLocaleString()}</span>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            <Button onClick={handleSave} className="w-full gap-2" disabled={bales <= 0 || saving}>
-              <Save className="h-4 w-4" /> Save Production Record
-            </Button>
-          </CardContent>
-        </Card>
-
-        {/* Pricing Config (admin only) */}
-        <div className="space-y-6">
-          {isAdmin && (
-            <Card>
-              <CardHeader><CardTitle className="text-base">Pricing Configuration</CardTitle></CardHeader>
-              <CardContent className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label>Economy Price/Bottle (KSh)</Label>
-                    <Input type="number" min={0} value={economyPrice} onChange={e => setEconomyPrice(Number(e.target.value))} />
-                  </div>
-                  <div>
-                    <Label>Executive Price/Bottle (KSh)</Label>
-                    <Input type="number" min={0} value={executivePrice} onChange={e => setExecutivePrice(Number(e.target.value))} />
-                  </div>
                 </div>
-                <Button variant="outline" onClick={handleSavePricing} className="w-full">Save Pricing</Button>
-              </CardContent>
-            </Card>
-          )}
+              )}
 
-          {/* Chart */}
-          {chartData.length > 0 && (
-            <Card>
-              <CardHeader><CardTitle className="text-base flex items-center gap-2"><BarChart3 className="h-4 w-4" /> Production History</CardTitle></CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={200}>
-                  <BarChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis dataKey="date" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
-                    <YAxis tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
-                    <Tooltip />
-                    <Bar dataKey="Good" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="Faulty" fill="hsl(var(--destructive))" radius={[4, 4, 0, 0]} opacity={0.6} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      </div>
+              <Button
+                onClick={handleSave}
+                className="w-full gap-2"
+                disabled={!selectedBranchId || !selectedSpecId || !selectedProductId || quantityProcessed <= 0 || !isSufficient || saving}
+              >
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                Save Production Record
+              </Button>
+            </CardContent>
+          </Card>
 
-      {/* Recent Records Table */}
-      {records.length > 0 && (
-        <Card>
-          <CardHeader><CardTitle className="text-sm font-semibold">Recent Production Records</CardTitle></CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-muted-foreground">
-                    <th className="text-left py-2 pr-3">Date</th>
-                    <th className="text-right py-2 px-2">Bales</th>
-                    <th className="text-right py-2 px-2">Total</th>
-                    <th className="text-right py-2 px-2">Good</th>
-                    <th className="text-right py-2 px-2">Faulty</th>
-                    <th className="text-right py-2 px-2">Eco Packs</th>
-                    <th className="text-right py-2 px-2">Exec Packs</th>
-                    <th className="text-right py-2 pl-2">Revenue</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {records.slice(0, 15).map(r => (
-                    <tr key={r.id} className="border-b last:border-0">
-                      <td className="py-2 pr-3 font-medium">{format(new Date(r.production_date), "dd MMM yyyy")}</td>
-                      <td className="text-right py-2 px-2">{r.bales}</td>
-                      <td className="text-right py-2 px-2">{r.total_bottles}</td>
-                      <td className="text-right py-2 px-2 text-success">{r.good_bottles}</td>
-                      <td className="text-right py-2 px-2 text-destructive">{r.faulty_bottles}</td>
-                      <td className="text-right py-2 px-2">{r.economy_packs}</td>
-                      <td className="text-right py-2 px-2">{r.executive_packs}</td>
-                      <td className="text-right py-2 pl-2 font-medium">KSh {r.expected_revenue.toLocaleString()}</td>
-                    </tr>
+          {/* Recent Records */}
+          <Card>
+            <CardHeader><CardTitle className="text-base">Recent Production Records</CardTitle></CardHeader>
+            <CardContent>
+              {records.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-6">No production records yet.</p>
+              ) : (
+                <div className="space-y-3 max-h-[500px] overflow-y-auto">
+                  {records.map(r => (
+                    <Card key={r.id} className="border-l-4 border-l-primary">
+                      <CardContent className="p-3 text-sm space-y-1">
+                        <div className="flex justify-between">
+                          <span className="font-medium">{r.notes || "Production Run"}</span>
+                          <span className="text-xs text-muted-foreground">{format(new Date(r.production_date), "dd MMM yyyy")}</span>
+                        </div>
+                        <div className="flex gap-3 text-xs text-muted-foreground">
+                          <span>Processed: <strong>{r.total_bottles}</strong></span>
+                          <span>Good: <strong className="text-success">{r.good_bottles}</strong></span>
+                          {r.faulty_bottles > 0 && <span>Faulty: <strong className="text-destructive">{r.faulty_bottles}</strong></span>}
+                        </div>
+                      </CardContent>
+                    </Card>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       )}
     </div>
   );

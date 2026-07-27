@@ -3,15 +3,18 @@ import { useData } from "@/context/DataContext";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Package, ShoppingCart, TrendingUp, AlertTriangle, DollarSign, ArrowDownCircle, Users, CreditCard, Target, Trophy } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Package, ShoppingCart, TrendingUp, AlertTriangle, DollarSign, ArrowDownCircle, Users, CreditCard, Target, Trophy, Megaphone, Bell, Info, ExternalLink } from "lucide-react";
 import SubscriptionCard from "@/components/SubscriptionCard";
 import AnimatedPage from "@/components/AnimatedPage";
 import AnimatedCounter from "@/components/AnimatedCounter";
 import { motion } from "framer-motion";
 import { format, isToday, startOfMonth, isAfter, subDays, startOfDay } from "date-fns";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, CartesianGrid, Legend } from "recharts";
+import { Link } from "react-router-dom";
 
 const COLORS = ["hsl(195,85%,55%)", "hsl(142,71%,45%)", "hsl(38,92%,50%)", "hsl(0,72%,51%)", "hsl(220,70%,22%)"];
 
@@ -27,10 +30,23 @@ interface UserTarget {
   period: string;
 }
 
+interface Announcement {
+  id: string;
+  title: string;
+  message: string;
+  priority: "Normal" | "Important" | "Critical";
+  created_by: string;
+  created_at: string;
+  is_pinned: boolean;
+}
+
 export default function Dashboard() {
   const { products, sales, purchases, customers } = useData();
   const { profile, user, isAdmin, roles } = useAuth();
   const [myTargets, setMyTargets] = useState<UserTarget[]>([]);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [notifAnnouncement, setNotifAnnouncement] = useState<Announcement | null>(null);
 
   // Fetch targets for current user
   useEffect(() => {
@@ -47,6 +63,29 @@ export default function Dashboard() {
         })));
       });
   }, [user]);
+
+  // Fetch active announcements
+  useEffect(() => {
+    if (!user) return;
+    (supabase as any).rpc("get_active_announcements").then(({ data }: { data: Announcement[] | null }) => {
+      if (data) {
+        setAnnouncements(data);
+        // Show notification for the newest Important or Critical announcement
+        const importantOrCritical = data.find(a => a.priority === "Critical" || a.priority === "Important");
+        if (importantOrCritical) {
+          // Check if we've already shown this one (using localStorage)
+          const seenId = localStorage.getItem("last_seen_announcement");
+          if (seenId !== importantOrCritical.id) {
+            setNotifAnnouncement(importantOrCritical);
+            setNotifOpen(true);
+            localStorage.setItem("last_seen_announcement", importantOrCritical.id);
+          }
+        }
+      }
+    });
+  }, [user]);
+
+  // Announcements are already sorted by the RPC: pinned first, then by priority, then by date
 
   const todaySales = sales.filter(s => isToday(new Date(s.date)));
   const monthStart = startOfMonth(new Date());
@@ -138,6 +177,48 @@ export default function Dashboard() {
         <p className="text-muted-foreground text-sm">Here's your Wonder Aqua overview</p>
       </div>
 
+      {/* Announcements Widget */}
+      {announcements.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2 flex flex-row items-center justify-between">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <Megaphone className="h-4 w-4 text-primary" />
+              Announcements
+            </CardTitle>
+            <Link to="/app/announcements">
+              <Button variant="ghost" size="sm" className="gap-1 text-xs">
+                View All <ExternalLink className="h-3 w-3" />
+              </Button>
+            </Link>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {announcements.slice(0, 5).map(a => {
+              const priorityColors: Record<string, string> = {
+                Normal: "bg-secondary text-secondary-foreground",
+                Important: "bg-yellow-500/15 text-yellow-600",
+                Critical: "bg-destructive/15 text-destructive",
+              };
+              return (
+                <div key={a.id} className="flex items-start gap-3 p-2 rounded-lg hover:bg-muted/50 transition-colors">
+                  <div className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${a.priority === "Critical" ? "bg-destructive/10" : a.priority === "Important" ? "bg-yellow-500/10" : "bg-secondary"}`}>
+                    <Megaphone className={`h-4 w-4 ${a.priority === "Critical" ? "text-destructive" : a.priority === "Important" ? "text-yellow-600" : "text-secondary-foreground"}`} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <Badge className={`text-[9px] ${priorityColors[a.priority]}`}>{a.priority}</Badge>
+                      {a.is_pinned && <span className="text-[10px]" title="Pinned">📌</span>}
+                      <span className="text-xs font-semibold text-foreground">{a.title}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{a.message}</p>
+                  </div>
+                  <span className="text-[9px] text-muted-foreground shrink-0">{format(new Date(a.created_at), "dd MMM")}</span>
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
+      )}
+
       {/* My Targets (for cashiers / stock managers) */}
       {myTargets.length > 0 && (
         <div className="space-y-3">
@@ -191,14 +272,16 @@ export default function Dashboard() {
             </CardContent></Card>
           </motion.div>
         )}
-        <motion.div {...cardMotion} transition={{ ...cardMotion.transition, delay: 0.1 }}>
-          <Card className="stat-card hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300"><CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div><p className="text-xs text-muted-foreground font-medium">Today's Profit</p><p className="text-xl font-bold text-success"><AnimatedCounter value={todayProfit} prefix="KSh " /></p></div>
-              <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center"><TrendingUp className="h-5 w-5 text-success" /></div>
-            </div>
-          </CardContent></Card>
-        </motion.div>
+        {!isCashier && (
+          <motion.div {...cardMotion} transition={{ ...cardMotion.transition, delay: 0.1 }}>
+            <Card className="stat-card hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300"><CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div><p className="text-xs text-muted-foreground font-medium">Today's Profit</p><p className="text-xl font-bold text-success"><AnimatedCounter value={todayProfit} prefix="KSh " /></p></div>
+                <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center"><TrendingUp className="h-5 w-5 text-success" /></div>
+              </div>
+            </CardContent></Card>
+          </motion.div>
+        )}
         {!isCashier && !isStockMgr && (
           <motion.div {...cardMotion} transition={{ ...cardMotion.transition, delay: 0.15 }}>
             <Card className="stat-card hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300"><CardContent className="p-4">
@@ -465,7 +548,37 @@ export default function Dashboard() {
           </Card>
         </div>
       )}
+      {/* Notification Dialog for new Important/Critical announcements */}
+      <Dialog open={notifOpen} onOpenChange={setNotifOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Bell className="h-5 w-5 text-primary" />
+              New Company Announcement
+            </DialogTitle>
+          </DialogHeader>
+          {notifAnnouncement && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Badge className={`text-[10px] ${notifAnnouncement.priority === "Critical" ? "bg-destructive/15 text-destructive" : "bg-yellow-500/15 text-yellow-600"}`}>
+                  {notifAnnouncement.priority}
+                </Badge>
+                <span className="font-semibold text-sm text-foreground">{notifAnnouncement.title}</span>
+              </div>
+              <p className="text-sm text-muted-foreground">{notifAnnouncement.message}</p>
+              <div className="flex gap-2 pt-2">
+                <Link to="/app/announcements" onClick={() => setNotifOpen(false)}>
+                  <Button size="sm">Read Now</Button>
+                </Link>
+                <Button variant="outline" size="sm" onClick={() => setNotifOpen(false)}>Later</Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
     </AnimatedPage>
   );
 }
+
+

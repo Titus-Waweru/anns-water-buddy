@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { finalizePaymentCompletion } from './lib/payment-finalizer.js';
 
 let supabase = null;
 try {
@@ -74,9 +75,11 @@ export default async function handler(req, res) {
     }).eq('id', payment.id);
 
     if (payment.sale_id) {
-      await supabase.from('sales')
-        .update({ payment_status: isSuccess ? 'PAID' : 'FAILED' })
-        .eq('id', payment.sale_id);
+      try {
+        await finalizePaymentCompletion({ supabase, saleId: payment.sale_id, paymentStatus: isSuccess ? 'PAID' : 'FAILED' });
+      } catch (finalizeError) {
+        console.error('Callback finalization error:', finalizeError);
+      }
     }
 
     return ack();

@@ -13,13 +13,26 @@ import { Plus, ShoppingCart, Printer, Smartphone, Loader2, RefreshCw, X, CheckCi
 import { format } from "date-fns";
 import { toast } from "sonner";
 import SaleReceipt from "@/components/SaleReceipt";
+import ProductSearch from "@/components/ProductSearch";
+
 
 type PaymentMode = "Cash" | "Mpesa" | "Credit";
 type DiscountType = "percentage" | "fixed";
 
+interface CartItem {
+  id: string;
+  productId: string;
+  productName: string;
+  quantity: number;
+  sellingPrice: number;
+  buyingPrice: number;
+  subtotal: number;
+  profit: number;
+}
+
 export default function Sales() {
-  const { products, customers, sales, addSale, refetch, effectiveBranchId } = useData();
-  const { user } = useAuth();
+  const { products, customers, sales, branches, addSale, addCartSale, finalizeSale: finalizeCartSale, refetch, effectiveBranchId } = useData();
+  const { user, profile } = useAuth();
   const [open, setOpen] = useState(false);
   const [receiptData, setReceiptData] = useState<any>(null);
   const [mpesaPhone, setMpesaPhone] = useState("");
@@ -39,9 +52,62 @@ export default function Sales() {
     paymentTime: new Date().toISOString().slice(0, 16),
     notes: "",
   });
+  const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const idempotencyKeyRef = useRef<string | null>(null);
   const pollRef = useRef<number | null>(null);
   const clockRef = useRef<number | null>(null);
+
+  const totalCartQuantity = cartItems.reduce((sum, item) => sum + item.quantity, 0);
+
+  const addItemToCart = () => {
+    if (!selectedProduct || form.quantity < 1) {
+      toast.error("Select a product and enter a valid quantity.");
+      return;
+    }
+    if (form.quantity > selectedProduct.quantity) {
+      toast.error("Not enough stock available");
+      return;
+    }
+    setCartItems(prev => {
+      const existing = prev.find(item => item.productId === selectedProduct.id);
+      if (existing) {
+        const updatedQuantity = existing.quantity + form.quantity;
+        return prev.map(item => item.productId === selectedProduct.id ? {
+          ...item,
+          quantity: updatedQuantity,
+          subtotal: updatedQuantity * item.sellingPrice,
+          profit: updatedQuantity * (item.sellingPrice - item.buyingPrice),
+        } : item);
+      }
+      return [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          productId: selectedProduct.id,
+          productName: selectedProduct.name,
+          quantity: form.quantity,
+          sellingPrice: selectedProduct.selling_price,
+          buyingPrice: selectedProduct.buying_price,
+          subtotal: selectedProduct.selling_price * form.quantity,
+          profit: (selectedProduct.selling_price - selectedProduct.buying_price) * form.quantity,
+        },
+      ];
+    });
+    setForm({ ...form, productId: "", quantity: 1 });
+  };
+
+  const updateCartItem = (id: string, quantity: number) => {
+    setCartItems(prev => prev.map(item => item.id === id ? {
+      ...item,
+      quantity,
+      subtotal: item.sellingPrice * quantity,
+      profit: (item.sellingPrice - item.buyingPrice) * quantity,
+    } : item));
+  };
+
+  const removeCartItem = (id: string) => {
+    setCartItems(prev => prev.filter(item => item.id !== id));
+  };
 
   const [form, setForm] = useState({
     customerId: "",
@@ -50,8 +116,6 @@ export default function Sales() {
     discountType: "fixed" as DiscountType,
     discountValue: 0,
     paymentMode: "Cash" as PaymentMode,
-    // Mpesa sub-mode. "stk" = automatic STK push, "manual" = cashier
-    // records the M-Pesa transaction code from customer's SMS.
     mpesaEntryMode: "stk" as "stk" | "manual",
     mpesaCode: "",
   });
@@ -60,74 +124,21 @@ export default function Sales() {
   const selectedProduct = products.find(p => p.id === form.productId);
   const selectedCustomer = customers.find(c => c.id === form.customerId);
 
-  const subtotal = selectedProduct ? selectedProduct.selling_price * form.quantity : 0;
+  const isCartSale = cartItems.length > 0;
+  const singleItemSubtotal = selectedProduct ? selectedProduct.selling_price * form.quantity : 0;
+  const cartSubtotal = cartItems.reduce((sum, item) => sum + item.subtotal, 0);
+  const totalCost = cartItems.reduce((sum, item) => sum + item.buyingPrice * item.quantity, 0);
+  const totalSellingValue = cartItems.reduce((sum, item) => sum + item.sellingPrice * item.quantity, 0);
+  const totalExpectedProfit = totalSellingValue - totalCost;
+  const subtotal = isCartSale ? cartSubtotal : singleItemSubtotal;
   const discountAmount = form.discountType === "percentage"
     ? subtotal * (form.discountValue / 100)
     : form.discountValue;
-  const finalAmount = Math.max(0, subtotal - discountAmount);
-  const profit = selectedProduct
-    ? (selectedProduct.selling_price - selectedProduct.buying_price) * form.quantity - discountAmount
-    : 0;
+  const finalAmount = Math.max(0, subtotal - Math.min(subtotal, discountAmount));
+  const profit = isCartSale
+    ? totalExpectedProfit - Math.min(subtotal, discountAmount)
+    : (selectedProduct ? (selectedProduct.selling_price - selectedProduct.buying_price) * form.quantity : 0) - Math.min(subtotal, discountAmount);
 
-  // ---- Finalize a paid sale: deduct inventory, log, award loyalty, show receipt ----
-  const finalizeSale = async (saleId: string) => {
-    const { data: sale } = await supabase.from("sales").select("*").eq("id", saleId).maybeSingle();
-    if (!sale) return;
-
-    const product = products.find(p => p.id === sale.product_id);
-    if (product) {
-      await supabase.from("products")
-        .update({ quantity: Math.max(0, product.quantity - sale.quantity) })
-        .eq("id", sale.product_id);
-      await supabase.from("inventory_logs").insert({
-        product_id: sale.product_id,
-        product_name: sale.product_name,
-        type: "OUT",
-        quantity: sale.quantity,
-        reference: `Sale to ${sale.customer_name || "Walk-in"}`,
-        date: sale.date,
-        branch_id: sale.branch_id,
-      });
-    }
-
-    const loyaltyPoints = Math.floor(sale.final_amount / 100);
-    if (sale.customer_id && loyaltyPoints > 0) {
-      await supabase.from("loyalty_points").insert({
-        customer_id: sale.customer_id,
-        sale_id: sale.id,
-        points: loyaltyPoints,
-        description: `Sale: ${sale.product_name} × ${sale.quantity}`,
-      });
-      const cust = customers.find(c => c.id === sale.customer_id);
-      const newTotal = (cust?.loyalty_points || 0) + loyaltyPoints;
-      await supabase.from("customers").update({ loyalty_points: newTotal }).eq("id", sale.customer_id);
-    }
-
-    const totalLoyalty = (selectedCustomer?.loyalty_points || 0) + loyaltyPoints;
-    setReceiptData({
-      id: sale.id,
-      customerName: sale.customer_name || "Walk-in",
-      productName: sale.product_name,
-      quantity: sale.quantity,
-      sellingPrice: sale.selling_price,
-      totalAmount: sale.total_amount,
-      discountAmount: sale.discount_amount,
-      finalAmount: sale.final_amount,
-      paymentMode: sale.payment_mode,
-      profit: sale.profit,
-      loyaltyPoints,
-      totalLoyaltyPoints: totalLoyalty,
-      rewardMessage: totalLoyalty >= 100 ? "🎉 Eligible for loyalty reward!" : null,
-      date: sale.date,
-    });
-    refetch();
-  };
-
-  // ---- Actively poll Co-op Transaction Status API every 3s ----
-  // Co-op does NOT send callbacks. We ask their status endpoint via the
-  // mpesa-transaction-status edge function. After 120s we stop auto-polling
-  // and switch to "still_processing" so the cashier can Refresh / Continue /
-  // Cancel — we NEVER auto-fail a payment.
   const queryStatus = async (messageRef: string) => {
     const { data } = await supabase.functions.invoke("mpesa-transaction-status", {
       body: { message_reference: messageRef },
@@ -149,7 +160,7 @@ export default function Sales() {
         if (pollRef.current) window.clearInterval(pollRef.current);
         setStkStatus("idle");
         toast.success("Payment confirmed!");
-        await finalizeSale(stkPending.saleId);
+        await finalizeCartSale(stkPending.saleId);
         setStkPending(null);
         setOpen(false);
         return;
@@ -165,7 +176,6 @@ export default function Sales() {
         setStkStatus("cancelled");
         return;
       }
-      // After 120s, stop auto-polling but leave payment PENDING.
       if (elapsedMs > 120_000) {
         if (pollRef.current) window.clearInterval(pollRef.current);
         setStkStatus("still_processing");
@@ -182,7 +192,6 @@ export default function Sales() {
         body: { sale_id: saleId, amount, phone, narration: `Sale ${saleId.slice(0, 8)}` },
       });
 
-      // Graceful upstream-blocked path: backend returns 200 + fallback:true.
       if (!error && data?.fallback) {
         setStkStatus("failed");
         toast.error(
@@ -213,9 +222,6 @@ export default function Sales() {
     }
   };
 
-  // Cancel STK — stops UI polling only. Does NOT cancel the bank transaction;
-  // the payment stays PENDING and can be resolved later via Payments Trace
-  // or the reconcile job (which query Co-op's Transaction Status API).
   const cancelStk = async () => {
     if (!stkPending || isCancelling) return;
     setIsCancelling(true);
@@ -238,9 +244,14 @@ export default function Sales() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting) return;
-    if (!selectedProduct || form.quantity < 1) return;
-    if (form.quantity > selectedProduct.quantity) {
+    const isCartSale = cartItems.length > 0;
+    if (!isCartSale && (!selectedProduct || form.quantity < 1)) return;
+    if (!isCartSale && form.quantity > selectedProduct.quantity) {
       toast.error("Not enough stock available");
+      return;
+    }
+    if (isCartSale && cartItems.some(item => item.quantity < 1)) {
+      toast.error("Cart contains an invalid quantity.");
       return;
     }
     if (form.paymentMode === "Mpesa" && !mpesaPhone.trim()) {
@@ -258,21 +269,30 @@ export default function Sales() {
 
     setIsSubmitting(true);
     try {
-      // Stable per-attempt idempotency key prevents duplicate inserts
-      // from accidental double-clicks or retries.
       if (!idempotencyKeyRef.current) {
         idempotencyKeyRef.current = `sale_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
       }
       const idempotencyKey = idempotencyKeyRef.current;
 
-      const saleData = {
+      const saleItemsPayload = cartItems.map(item => ({
+        product_id: item.productId,
+        product_name: item.productName,
+        quantity: item.quantity,
+        selling_price: item.sellingPrice,
+        buying_price: item.buyingPrice,
+        total_amount: item.subtotal,
+        discount_amount: 0,
+        profit: item.profit,
+      }));
+
+      const saleHeader = {
         customer_id: form.customerId || null,
         customer_name: selectedCustomer?.name || "Walk-in",
-        product_id: form.productId,
-        product_name: selectedProduct.name,
-        quantity: form.quantity,
-        selling_price: selectedProduct.selling_price,
-        buying_price: selectedProduct.buying_price,
+        product_id: isCartSale ? cartItems[0].productId : form.productId,
+        product_name: isCartSale ? cartItems[0].productName : selectedProduct.name,
+        quantity: isCartSale ? totalCartQuantity : form.quantity,
+        selling_price: isCartSale ? cartItems[0].sellingPrice : selectedProduct.selling_price,
+        buying_price: isCartSale ? cartItems[0].buyingPrice : selectedProduct.buying_price,
         discount_type: form.discountType,
         discount_value: form.discountValue,
         total_amount: subtotal,
@@ -284,9 +304,7 @@ export default function Sales() {
       };
 
       if (form.paymentMode === "Mpesa" && form.mpesaEntryMode === "manual") {
-        // Manual M-Pesa: sale finalizes immediately as PAID.
         const code = form.mpesaCode.trim().toUpperCase();
-        // Reject duplicate M-Pesa transaction codes.
         const { data: dup } = await supabase
           .from("payments")
           .select("id")
@@ -296,10 +314,25 @@ export default function Sales() {
           toast.error("That M-Pesa transaction code has already been recorded.");
           return;
         }
-        const { data: sale, error } = await supabase
+        let sale: any;
+      if (isCartSale) {
+        sale = await addCartSale({
+          ...saleHeader,
+          branch_id: effectiveBranchId,
+          recorded_by: user?.id,
+          payment_status: "PAID",
+          idempotency_key: idempotencyKey,
+          items: saleItemsPayload,
+        } as any);
+        if (!sale) {
+          toast.error("Could not create sale");
+          return;
+        }
+      } else {
+        const { data: singleSale, error } = await supabase
           .from("sales")
           .insert({
-            ...saleData,
+            ...saleHeader,
             branch_id: effectiveBranchId,
             recorded_by: user?.id,
             payment_status: "PAID",
@@ -307,14 +340,16 @@ export default function Sales() {
           })
           .select()
           .single();
-        if (error || !sale) {
+        if (error || !singleSale) {
           toast.error(error?.message || "Could not create sale");
           return;
         }
-        const messageRef = `MANUAL-${sale.id.slice(0, 8).toUpperCase()}-${Date.now()}`;
-        await supabase.from("payments").insert({
-          provider: "coop",
-          sale_id: sale.id,
+        sale = singleSale;
+      }
+      const messageRef = `MANUAL-${sale.id.slice(0, 8).toUpperCase()}-${Date.now()}`;
+      await supabase.from("payments").insert({
+        provider: "coop",
+        sale_id: sale.id,
           message_reference: messageRef,
           transaction_currency: "KES",
           initiated_by: user?.id || null,
@@ -332,35 +367,56 @@ export default function Sales() {
           result_code: "0",
           result_description: "Manual M-Pesa entry",
         });
-        await finalizeSale(sale.id);
+        await finalizeCartSale(sale.id);
         toast.success("Manual M-Pesa payment recorded.");
         idempotencyKeyRef.current = null;
         setForm({ customerId: "", productId: "", quantity: 1, discountType: "fixed", discountValue: 0, paymentMode: "Cash", mpesaEntryMode: "stk", mpesaCode: "" });
+        setCartItems([]);
         setMpesaPhone("");
         setOpen(false);
         return;
       }
 
       if (form.paymentMode === "Mpesa") {
-        // Insert PENDING sale directly (skip context — it deducts inventory)
-        const { data: sale, error } = await supabase
-          .from("sales")
-          .insert({
-            ...saleData,
+        let sale: any;
+        if (isCartSale) {
+          sale = await addCartSale({
+            ...saleHeader,
             branch_id: effectiveBranchId,
             recorded_by: user?.id,
             payment_status: "PENDING",
             idempotency_key: idempotencyKey,
-          })
-          .select()
-          .single();
-        if (error || !sale) {
-          // 23505 = unique_violation → another tab already created this sale
-          if ((error as any)?.code === "23505") {
-            toast.info("This sale is already being processed.");
-          } else {
-            toast.error(error?.message || "Could not create sale");
+            items: saleItemsPayload,
+          } as any);
+          if (!sale) {
+            toast.error("Could not create sale");
+            return;
           }
+        } else {
+          const { data: singleSale, error } = await supabase
+            .from("sales")
+            .insert({
+              ...saleHeader,
+              branch_id: effectiveBranchId,
+              recorded_by: user?.id,
+              payment_status: "PENDING",
+              idempotency_key: idempotencyKey,
+            })
+            .select()
+            .single();
+          if (error || !singleSale) {
+            if ((error as any)?.code === "23505") {
+              toast.info("This sale is already being processed.");
+            } else {
+              toast.error(error?.message || "Could not create sale");
+            }
+            return;
+          }
+          sale = singleSale;
+        }
+        if ((sale as any).payment_status && (sale as any).payment_status !== "PENDING") {
+          console.warn("Attempted STK push for non-pending sale", sale.id, (sale as any).payment_status);
+          toast.error("Sale already marked paid — cannot send STK push.");
           return;
         }
         await sendStkPush(sale.id, mpesaPhone, finalAmount);
@@ -368,27 +424,39 @@ export default function Sales() {
       }
 
 
-      // Cash / Credit — standard path (PAID, deducts inventory in context)
-      await addSale({ ...saleData, idempotency_key: idempotencyKey } as any);
+      if (isCartSale) {
+        await addCartSale({
+          ...saleHeader,
+          branch_id: effectiveBranchId,
+          recorded_by: user?.id,
+          payment_status: "PAID",
+          idempotency_key: idempotencyKey,
+          items: saleItemsPayload,
+        } as any);
+      } else {
+        await addSale({ ...saleHeader, idempotency_key: idempotencyKey } as any);
+      }
 
       const loyaltyPoints = Math.floor(finalAmount / 100);
       if (form.customerId && loyaltyPoints > 0) {
         await supabase.from("loyalty_points").insert({
           customer_id: form.customerId,
           points: loyaltyPoints,
-          description: `Sale: ${selectedProduct.name} × ${form.quantity}`,
+          description: `Sale: ${isCartSale ? `${cartItems.length} items` : `${selectedProduct?.name || "product"} × ${form.quantity}`}`,
         });
         const newTotal = (selectedCustomer?.loyalty_points || 0) + loyaltyPoints;
         await supabase.from("customers").update({ loyalty_points: newTotal }).eq("id", form.customerId);
       }
 
       const totalLoyalty = (selectedCustomer?.loyalty_points || 0) + loyaltyPoints;
+      const branchName = branches.find(b => b.id === effectiveBranchId)?.name || "";
+      const cashierName = profile?.full_name || "";
       setReceiptData({
         id: crypto.randomUUID(),
         customerName: selectedCustomer?.name || "Walk-in",
-        productName: selectedProduct.name,
-        quantity: form.quantity,
-        sellingPrice: selectedProduct.selling_price,
+        productName: isCartSale ? `${cartItems.length} items` : selectedProduct.name,
+        quantity: isCartSale ? totalCartQuantity : form.quantity,
+        sellingPrice: isCartSale ? cartItems[0].sellingPrice : selectedProduct.selling_price,
         totalAmount: subtotal,
         discountAmount,
         finalAmount,
@@ -396,13 +464,25 @@ export default function Sales() {
         profit,
         loyaltyPoints,
         totalLoyaltyPoints: totalLoyalty,
-        rewardMessage: totalLoyalty >= 100 ? "🎉 Eligible for loyalty reward!" : null,
+        loyaltyPointsEarned: loyaltyPoints,
+        branchName,
+        cashierName,
+        mpesaReceipt: null,
+        items: isCartSale ? cartItems.map(ci => ({
+          productName: ci.productName,
+          quantity: ci.quantity,
+          sellingPrice: ci.sellingPrice,
+          subtotal: ci.subtotal,
+        })) : undefined,
+        totalCost: isCartSale ? totalCost : undefined,
+        expectedProfit: isCartSale ? totalExpectedProfit : undefined,
         date: new Date().toISOString(),
       });
 
       toast.success("Sale recorded successfully!");
       idempotencyKeyRef.current = null;
       setForm({ customerId: "", productId: "", quantity: 1, discountType: "fixed", discountValue: 0, paymentMode: "Cash", mpesaEntryMode: "stk", mpesaCode: "" });
+      setCartItems([]);
 
       setMpesaPhone("");
       setOpen(false);
@@ -427,14 +507,12 @@ export default function Sales() {
 
   const showRetry = stkPending && (stkStatus === "failed" || stkStatus === "cancelled");
 
-  // "Continue Checking" — restart the 3s poll from where we left off.
   const continueChecking = () => {
     if (!stkPending) return;
     setStkPending({ ...stkPending, startedAt: Date.now() });
     setStkStatus("waiting");
   };
 
-  // "Refresh Status" — one-shot status query against Co-op.
   const refreshStatusNow = async () => {
     if (!stkPending || isCheckingNow) return;
     setIsCheckingNow(true);
@@ -442,7 +520,7 @@ export default function Sales() {
       const data = await queryStatus(stkPending.messageRef);
       if (data?.status === "SUCCESS") {
         toast.success("Payment confirmed!");
-        await finalizeSale(stkPending.saleId);
+        await refetch();
         setStkPending(null);
         setStkStatus("idle");
         setOpen(false);
@@ -459,9 +537,6 @@ export default function Sales() {
     }
   };
 
-  // ---- Manual M-Pesa fallback ----
-  // Opens a form so the cashier can record the M-Pesa payment from the
-  // customer's SMS confirmation when STK Push is unavailable.
   const openManualMode = () => {
     if (pollRef.current) window.clearInterval(pollRef.current);
     setStkStatus("idle");
@@ -482,7 +557,6 @@ export default function Sales() {
       return;
     }
     const code = manualForm.mpesaCode.trim().toUpperCase();
-    // M-Pesa transaction codes are 10 alphanumeric chars (e.g. SFE1A2B3C4)
     if (!/^[A-Z0-9]{10}$/.test(code)) {
       toast.error("Enter a valid 10-character M-Pesa transaction code.");
       return;
@@ -494,64 +568,34 @@ export default function Sales() {
     setManualSubmitting(true);
     try {
       const paymentTimeIso = new Date(manualForm.paymentTime).toISOString();
-      // Update existing PENDING payment row created during STK attempt.
-      const { data: existing } = await supabase
-        .from("payments")
-        .select("id")
-        .eq("message_reference", stkPending.messageRef)
-        .maybeSingle();
-
-      const payload: any = {
-        status: "SUCCESS",
-        payment_method: "MPESA_MANUAL",
-        payment_source: "Manual Entry",
-        mpesa_receipt: code,
-        payment_time: paymentTimeIso,
-        transaction_date: paymentTimeIso,
-        phone_number: manualForm.phone.trim(),
-        amount: Number(manualForm.amount),
-        notes: manualForm.notes || null,
-        entered_by: user?.id || null,
-        result_code: "0",
-        result_description: "Manual M-Pesa entry",
-        updated_at: new Date().toISOString(),
-      };
-
-      let dbError: any = null;
-      if (existing) {
-        const { error } = await supabase.from("payments").update(payload).eq("id", existing.id);
-        dbError = error;
-      } else {
-        const { error } = await supabase.from("payments").insert({
-          provider: "coop",
+      const resp = await fetch("/api/mpesa-manual-entry", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
           sale_id: stkPending.saleId,
           message_reference: stkPending.messageRef,
-          transaction_currency: "KES",
-          initiated_by: user?.id || null,
+          mpesa_receipt: code,
+          phone_number: manualForm.phone.trim(),
+          amount: Number(manualForm.amount),
+          payment_time: paymentTimeIso,
+          transaction_date: paymentTimeIso,
           branch_id: effectiveBranchId,
+          entered_by: user?.id || null,
+          notes: manualForm.notes || null,
           narration: `Manual M-Pesa ${code}`,
-          ...payload,
-        });
-        dbError = error;
-      }
+        }),
+      });
 
-      if (dbError) {
-        if ((dbError as any).code === "23505") {
-          toast.error("That M-Pesa transaction code has already been recorded.");
-        } else {
-          toast.error(dbError.message || "Could not save manual payment.");
-        }
+      const data = await resp.json();
+      if (!resp.ok || !data?.ok) {
+        toast.error(data?.error || "Could not save manual payment.");
         return;
       }
 
-      // Mark sale as PAID so it appears in reports exactly like an STK payment.
-      await supabase
-        .from("sales")
-        .update({ payment_status: "PAID" })
-        .eq("id", stkPending.saleId);
-
       toast.success("Manual M-Pesa payment recorded.");
-      await finalizeSale(stkPending.saleId);
+      await refetch();
       setManualMode(false);
       setStkPending(null);
       setStkStatus("idle");
@@ -737,14 +781,11 @@ export default function Sales() {
               </div>
               <div>
                 <Label>Product *</Label>
-                <Select value={form.productId} onValueChange={v => setForm({ ...form, productId: v })}>
-                  <SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger>
-                  <SelectContent>
-                    {products.map(p => (
-                      <SelectItem key={p.id} value={p.id}>{p.name} ({p.bottle_size}) — {p.quantity} in stock</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <ProductSearch
+                  products={products}
+                  value={form.productId}
+                  onChange={v => setForm({ ...form, productId: v })}
+                />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -762,6 +803,10 @@ export default function Sales() {
                     </SelectContent>
                   </Select>
                 </div>
+              </div>
+
+              <div className="pt-2">
+                <Button size="sm" onClick={addItemToCart} disabled={!form.productId || form.quantity < 1} className="gap-2">Add to cart</Button>
               </div>
 
               {form.paymentMode === "Mpesa" && (
@@ -830,6 +875,33 @@ export default function Sales() {
                 </div>
               </div>
 
+              {cartItems.length > 0 && (
+                <Card className="bg-muted/10">
+                  <CardContent className="p-3 space-y-2 max-h-[200px] overflow-y-auto">
+                    <div className="flex items-center justify-between font-medium">Cart <span className="text-sm text-muted-foreground">{totalCartQuantity} items</span></div>
+                    {cartItems.map(ci => (
+                      <div key={ci.id} className="flex items-center justify-between">
+                        <div className="min-w-0">
+                          <div className="truncate">{ci.productName} × {ci.quantity}</div>
+                          <div className="text-xs text-muted-foreground">KSh {ci.sellingPrice.toLocaleString()} each</div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Input type="number" value={ci.quantity} min={1} className="w-20" onChange={e => updateCartItem(ci.id, Number(e.target.value))} />
+                          <div className="text-right">KSh {ci.subtotal.toLocaleString()}</div>
+                          <Button size="icon" variant="ghost" onClick={() => removeCartItem(ci.id)}><X className="h-4 w-4" /></Button>
+                        </div>
+                      </div>
+                    ))}
+                    <div className="pt-3 border-t border-border space-y-2 text-sm">
+                      <div className="flex justify-between"><span>Total Selling Value</span><span>KSh {totalSellingValue.toLocaleString()}</span></div>
+                      <div className="flex justify-between"><span>Total Cost</span><span>KSh {totalCost.toLocaleString()}</span></div>
+                      <div className="flex justify-between"><span>Total Expected Profit</span><span>KSh {totalExpectedProfit.toLocaleString()}</span></div>
+                      <div className="flex justify-between font-semibold text-foreground"><span>Grand Total</span><span>KSh {finalAmount.toLocaleString()}</span></div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
               {selectedProduct && (
                 <Card className="bg-muted/50">
                   <CardContent className="p-3 space-y-1 text-sm">
@@ -842,12 +914,15 @@ export default function Sales() {
                 </Card>
               )}
 
-              <Button type="submit" className="w-full gap-2" disabled={!form.productId || isSubmitting || stkStatus === "sending"}>
+              <Button
+                type="submit"
+                className="w-full gap-2"
+                disabled={!(isCartSale || form.productId) || isSubmitting || stkStatus === "sending"}
+              >
                 {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
                 {form.paymentMode === "Mpesa"
                   ? (form.mpesaEntryMode === "manual" ? "Save M-Pesa Payment" : "Send STK Push")
                   : "Record Sale"}
-
               </Button>
             </form>
             )}

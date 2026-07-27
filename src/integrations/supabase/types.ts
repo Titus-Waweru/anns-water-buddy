@@ -803,6 +803,79 @@ export type Database = {
           },
         ]
       }
+      sale_items: {
+        Row: {
+          branch_id: string | null
+          buying_price: number
+          created_at: string
+          discount_amount: number
+          discount_type: Database["public"]["Enums"]["discount_type"] | null
+          discount_value: number
+          id: string
+          product_id: string
+          product_name: string
+          profit: number
+          quantity: number
+          sale_id: string
+          selling_price: number
+          total_amount: number
+        }
+        Insert: {
+          branch_id?: string | null
+          buying_price: number
+          created_at?: string
+          discount_amount?: number
+          discount_type?: Database["public"]["Enums"]["discount_type"] | null
+          discount_value?: number
+          id?: string
+          product_id: string
+          product_name: string
+          profit: number
+          quantity: number
+          sale_id: string
+          selling_price: number
+          total_amount: number
+        }
+        Update: {
+          branch_id?: string | null
+          buying_price?: number
+          created_at?: string
+          discount_amount?: number
+          discount_type?: Database["public"]["Enums"]["discount_type"] | null
+          discount_value?: number
+          id?: string
+          product_id?: string
+          product_name?: string
+          profit?: number
+          quantity?: number
+          sale_id?: string
+          selling_price?: number
+          total_amount?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sale_items_sale_id_fkey"
+            columns: ["sale_id"]
+            isOneToOne: false
+            referencedRelation: "sales"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sale_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sale_items_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       stock_adjustments: {
         Row: {
           adjustment_type: Database["public"]["Enums"]["adjustment_type"]

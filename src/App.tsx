@@ -25,6 +25,10 @@ import CashSubmission from "@/pages/CashSubmission";
 import Assets from "@/pages/Assets";
 import Vouchers from "@/pages/Vouchers";
 import Production from "@/pages/Production";
+import StockTransfer from "@/pages/StockTransfer";
+import Announcements from "@/pages/Announcements";
+import RawBottleInventory from "@/pages/RawBottleInventory";
+import CashReconciliation from "@/pages/CashReconciliation";
 import Targets from "@/pages/Targets";
 import SystemControl from "@/pages/SystemControl";
 import SubscriptionSettings from "@/pages/SubscriptionSettings";
@@ -136,11 +140,15 @@ const App = () => (
                         <Route path="/cash-submission" element={<RoleRoute allowed={["cashier"]}><CashSubmission /></RoleRoute>} />
                         <Route path="/assets" element={<RoleRoute allowed={[]}><Assets /></RoleRoute>} />
                         <Route path="/vouchers" element={<RoleRoute allowed={[]}><Vouchers /></RoleRoute>} />
+                        <Route path="/raw-bottles" element={<RoleRoute allowed={["stock_manager"]}><RawBottleInventory /></RoleRoute>} />
                         <Route path="/production" element={<RoleRoute allowed={["stock_manager"]}><Production /></RoleRoute>} />
+                        <Route path="/stock-transfer" element={<RoleRoute allowed={["stock_manager"]}><StockTransfer /></RoleRoute>} />
+                        <Route path="/announcements" element={<Announcements />} />
                         <Route path="/targets" element={<RoleRoute allowed={[]}><Targets /></RoleRoute>} />
                         <Route path="/system-control" element={<SystemControl />} />
                         <Route path="/subscription" element={<SubscriptionSettings />} />
-                        <Route path="/payments-trace" element={<RoleRoute allowed={[]}><PaymentsTrace /></RoleRoute>} />
+                        <Route path="/payments-trace" element={<RoleRoute allowed={["superadmin"]}><PaymentsTrace /></RoleRoute>} />
+                        <Route path="/cash-reconciliation" element={<RoleRoute allowed={["cashier"]}><CashReconciliation /></RoleRoute>} />
 
                         <Route path="*" element={<NotFound />} />
                       </Routes>
