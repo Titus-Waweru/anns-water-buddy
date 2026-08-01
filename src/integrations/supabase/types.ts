@@ -14,6 +14,56 @@ export type Database = {
   }
   public: {
     Tables: {
+      announcements: {
+        Row: {
+          created_at: string
+          created_by: string
+          expires_at: string | null
+          id: string
+          is_active: boolean
+          message: string
+          priority: string
+          target_branch_id: string | null
+          target_type: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by: string
+          expires_at?: string | null
+          id?: string
+          is_active?: boolean
+          message: string
+          priority?: string
+          target_branch_id?: string | null
+          target_type?: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          expires_at?: string | null
+          id?: string
+          is_active?: boolean
+          message?: string
+          priority?: string
+          target_branch_id?: string | null
+          target_type?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "announcements_target_branch_id_fkey"
+            columns: ["target_branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       assets: {
         Row: {
           acquired_date: string | null
@@ -61,11 +111,45 @@ export type Database = {
           },
         ]
       }
+      bottle_specifications: {
+        Row: {
+          bottle_size: string
+          bottles_per_bale: number | null
+          category: string
+          created_at: string
+          display_name: string
+          id: string
+          is_active: boolean
+          updated_at: string
+        }
+        Insert: {
+          bottle_size: string
+          bottles_per_bale?: number | null
+          category: string
+          created_at?: string
+          display_name: string
+          id?: string
+          is_active?: boolean
+          updated_at?: string
+        }
+        Update: {
+          bottle_size?: string
+          bottles_per_bale?: number | null
+          category?: string
+          created_at?: string
+          display_name?: string
+          id?: string
+          is_active?: boolean
+          updated_at?: string
+        }
+        Relationships: []
+      }
       branches: {
         Row: {
           created_at: string
           id: string
           is_active: boolean
+          is_factory: boolean
           location: string | null
           name: string
           phone: string | null
@@ -75,6 +159,7 @@ export type Database = {
           created_at?: string
           id?: string
           is_active?: boolean
+          is_factory?: boolean
           location?: string | null
           name: string
           phone?: string | null
@@ -84,12 +169,87 @@ export type Database = {
           created_at?: string
           id?: string
           is_active?: boolean
+          is_factory?: boolean
           location?: string | null
           name?: string
           phone?: string | null
           updated_at?: string
         }
         Relationships: []
+      }
+      cash_reconciliations: {
+        Row: {
+          actual_data: Json
+          actual_total: number
+          approval_status: Database["public"]["Enums"]["reconciliation_status"]
+          approved_at: string | null
+          approved_by: string | null
+          branch_id: string
+          cashier_id: string
+          created_at: string
+          difference: number
+          expected_data: Json
+          expected_total: number
+          id: string
+          reconciliation_date: string
+          rejection_reason: string | null
+          remarks: string | null
+          shift: string
+          status: string
+          transaction_charges: number
+          updated_at: string
+        }
+        Insert: {
+          actual_data?: Json
+          actual_total?: number
+          approval_status?: Database["public"]["Enums"]["reconciliation_status"]
+          approved_at?: string | null
+          approved_by?: string | null
+          branch_id: string
+          cashier_id: string
+          created_at?: string
+          difference?: number
+          expected_data?: Json
+          expected_total?: number
+          id?: string
+          reconciliation_date?: string
+          rejection_reason?: string | null
+          remarks?: string | null
+          shift: string
+          status: string
+          transaction_charges?: number
+          updated_at?: string
+        }
+        Update: {
+          actual_data?: Json
+          actual_total?: number
+          approval_status?: Database["public"]["Enums"]["reconciliation_status"]
+          approved_at?: string | null
+          approved_by?: string | null
+          branch_id?: string
+          cashier_id?: string
+          created_at?: string
+          difference?: number
+          expected_data?: Json
+          expected_total?: number
+          id?: string
+          reconciliation_date?: string
+          rejection_reason?: string | null
+          remarks?: string | null
+          shift?: string
+          status?: string
+          transaction_charges?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cash_reconciliations_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       cash_submissions: {
         Row: {
@@ -491,11 +651,15 @@ export type Database = {
           executive_packs: number
           expected_revenue: number
           faulty_bottles: number
+          finished_product_id: string | null
           good_bottles: number
+          good_bottles_created: number | null
           id: string
           loose_bottles: number
           notes: string | null
           production_date: string
+          raw_bottle_specification_id: string | null
+          raw_bottles_consumed: number | null
           recorded_by: string
           total_bottles: number
         }
@@ -510,11 +674,15 @@ export type Database = {
           executive_packs?: number
           expected_revenue?: number
           faulty_bottles?: number
+          finished_product_id?: string | null
           good_bottles?: number
+          good_bottles_created?: number | null
           id?: string
           loose_bottles?: number
           notes?: string | null
           production_date?: string
+          raw_bottle_specification_id?: string | null
+          raw_bottles_consumed?: number | null
           recorded_by: string
           total_bottles?: number
         }
@@ -529,11 +697,15 @@ export type Database = {
           executive_packs?: number
           expected_revenue?: number
           faulty_bottles?: number
+          finished_product_id?: string | null
           good_bottles?: number
+          good_bottles_created?: number | null
           id?: string
           loose_bottles?: number
           notes?: string | null
           production_date?: string
+          raw_bottle_specification_id?: string | null
+          raw_bottles_consumed?: number | null
           recorded_by?: string
           total_bottles?: number
         }
@@ -545,12 +717,27 @@ export type Database = {
             referencedRelation: "branches"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "production_records_finished_product_id_fkey"
+            columns: ["finished_product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "production_records_raw_bottle_specification_id_fkey"
+            columns: ["raw_bottle_specification_id"]
+            isOneToOne: false
+            referencedRelation: "bottle_specifications"
+            referencedColumns: ["id"]
+          },
         ]
       }
       products: {
         Row: {
           bales: number
           bottle_size: string
+          bottle_specification_id: string | null
           bottles_per_bale: number
           bottles_per_pack: number
           branch_id: string | null
@@ -568,6 +755,7 @@ export type Database = {
         Insert: {
           bales?: number
           bottle_size: string
+          bottle_specification_id?: string | null
           bottles_per_bale?: number
           bottles_per_pack?: number
           branch_id?: string | null
@@ -585,6 +773,7 @@ export type Database = {
         Update: {
           bales?: number
           bottle_size?: string
+          bottle_specification_id?: string | null
           bottles_per_bale?: number
           bottles_per_pack?: number
           branch_id?: string | null
@@ -600,6 +789,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "products_bottle_specification_id_fkey"
+            columns: ["bottle_specification_id"]
+            isOneToOne: false
+            referencedRelation: "bottle_specifications"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "products_branch_id_fkey"
             columns: ["branch_id"]
@@ -641,45 +837,57 @@ export type Database = {
       }
       purchases: {
         Row: {
+          bales_purchased: number | null
+          bottles_received: number | null
           branch_id: string | null
           buying_price: number
           created_at: string
           date: string
           id: string
           payment_mode: Database["public"]["Enums"]["payment_mode"]
-          product_id: string
+          product_id: string | null
           product_name: string
+          purchase_unit: string | null
           quantity: number
+          raw_bottle_specification_id: string | null
           recorded_by: string | null
           supplier_id: string | null
           supplier_name: string
           total_cost: number
         }
         Insert: {
+          bales_purchased?: number | null
+          bottles_received?: number | null
           branch_id?: string | null
           buying_price: number
           created_at?: string
           date?: string
           id?: string
           payment_mode?: Database["public"]["Enums"]["payment_mode"]
-          product_id: string
+          product_id?: string | null
           product_name: string
+          purchase_unit?: string | null
           quantity: number
+          raw_bottle_specification_id?: string | null
           recorded_by?: string | null
           supplier_id?: string | null
           supplier_name: string
           total_cost: number
         }
         Update: {
+          bales_purchased?: number | null
+          bottles_received?: number | null
           branch_id?: string | null
           buying_price?: number
           created_at?: string
           date?: string
           id?: string
           payment_mode?: Database["public"]["Enums"]["payment_mode"]
-          product_id?: string
+          product_id?: string | null
           product_name?: string
+          purchase_unit?: string | null
           quantity?: number
+          raw_bottle_specification_id?: string | null
           recorded_by?: string | null
           supplier_id?: string | null
           supplier_name?: string
@@ -701,10 +909,190 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "purchases_raw_bottle_specification_id_fkey"
+            columns: ["raw_bottle_specification_id"]
+            isOneToOne: false
+            referencedRelation: "bottle_specifications"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "purchases_supplier_id_fkey"
             columns: ["supplier_id"]
             isOneToOne: false
             referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      raw_bottle_inventory: {
+        Row: {
+          bottle_specification_id: string
+          branch_id: string
+          id: string
+          quantity_bottles: number
+          updated_at: string
+        }
+        Insert: {
+          bottle_specification_id: string
+          branch_id: string
+          id?: string
+          quantity_bottles?: number
+          updated_at?: string
+        }
+        Update: {
+          bottle_specification_id?: string
+          branch_id?: string
+          id?: string
+          quantity_bottles?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "raw_bottle_inventory_bottle_specification_id_fkey"
+            columns: ["bottle_specification_id"]
+            isOneToOne: false
+            referencedRelation: "bottle_specifications"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "raw_bottle_inventory_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      raw_bottle_inventory_logs: {
+        Row: {
+          bottle_specification_id: string
+          branch_id: string
+          created_at: string
+          id: string
+          movement_type: string
+          production_record_id: string | null
+          purchase_id: string | null
+          quantity_bottles: number
+          recorded_by: string | null
+          reference: string | null
+        }
+        Insert: {
+          bottle_specification_id: string
+          branch_id: string
+          created_at?: string
+          id?: string
+          movement_type: string
+          production_record_id?: string | null
+          purchase_id?: string | null
+          quantity_bottles: number
+          recorded_by?: string | null
+          reference?: string | null
+        }
+        Update: {
+          bottle_specification_id?: string
+          branch_id?: string
+          created_at?: string
+          id?: string
+          movement_type?: string
+          production_record_id?: string | null
+          purchase_id?: string | null
+          quantity_bottles?: number
+          recorded_by?: string | null
+          reference?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "raw_bottle_inventory_logs_bottle_specification_id_fkey"
+            columns: ["bottle_specification_id"]
+            isOneToOne: false
+            referencedRelation: "bottle_specifications"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "raw_bottle_inventory_logs_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "raw_bottle_inventory_logs_purchase_id_fkey"
+            columns: ["purchase_id"]
+            isOneToOne: false
+            referencedRelation: "purchases"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sale_items: {
+        Row: {
+          branch_id: string | null
+          buying_price: number
+          created_at: string
+          discount_amount: number
+          discount_type: Database["public"]["Enums"]["discount_type"] | null
+          discount_value: number
+          id: string
+          product_id: string
+          product_name: string
+          profit: number
+          quantity: number
+          sale_id: string
+          selling_price: number
+          total_amount: number
+        }
+        Insert: {
+          branch_id?: string | null
+          buying_price: number
+          created_at?: string
+          discount_amount?: number
+          discount_type?: Database["public"]["Enums"]["discount_type"] | null
+          discount_value?: number
+          id?: string
+          product_id: string
+          product_name: string
+          profit: number
+          quantity: number
+          sale_id: string
+          selling_price: number
+          total_amount: number
+        }
+        Update: {
+          branch_id?: string | null
+          buying_price?: number
+          created_at?: string
+          discount_amount?: number
+          discount_type?: Database["public"]["Enums"]["discount_type"] | null
+          discount_value?: number
+          id?: string
+          product_id?: string
+          product_name?: string
+          profit?: number
+          quantity?: number
+          sale_id?: string
+          selling_price?: number
+          total_amount?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sale_items_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sale_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sale_items_sale_id_fkey"
+            columns: ["sale_id"]
+            isOneToOne: false
+            referencedRelation: "sales"
             referencedColumns: ["id"]
           },
         ]
@@ -803,79 +1191,6 @@ export type Database = {
           },
         ]
       }
-      sale_items: {
-        Row: {
-          branch_id: string | null
-          buying_price: number
-          created_at: string
-          discount_amount: number
-          discount_type: Database["public"]["Enums"]["discount_type"] | null
-          discount_value: number
-          id: string
-          product_id: string
-          product_name: string
-          profit: number
-          quantity: number
-          sale_id: string
-          selling_price: number
-          total_amount: number
-        }
-        Insert: {
-          branch_id?: string | null
-          buying_price: number
-          created_at?: string
-          discount_amount?: number
-          discount_type?: Database["public"]["Enums"]["discount_type"] | null
-          discount_value?: number
-          id?: string
-          product_id: string
-          product_name: string
-          profit: number
-          quantity: number
-          sale_id: string
-          selling_price: number
-          total_amount: number
-        }
-        Update: {
-          branch_id?: string | null
-          buying_price?: number
-          created_at?: string
-          discount_amount?: number
-          discount_type?: Database["public"]["Enums"]["discount_type"] | null
-          discount_value?: number
-          id?: string
-          product_id?: string
-          product_name?: string
-          profit?: number
-          quantity?: number
-          sale_id?: string
-          selling_price?: number
-          total_amount?: number
-        }
-        Relationships: [
-          {
-            foreignKeyName: "sale_items_sale_id_fkey"
-            columns: ["sale_id"]
-            isOneToOne: false
-            referencedRelation: "sales"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "sale_items_product_id_fkey"
-            columns: ["product_id"]
-            isOneToOne: false
-            referencedRelation: "products"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "sale_items_branch_id_fkey"
-            columns: ["branch_id"]
-            isOneToOne: false
-            referencedRelation: "branches"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       stock_adjustments: {
         Row: {
           adjustment_type: Database["public"]["Enums"]["adjustment_type"]
@@ -932,6 +1247,91 @@ export type Database = {
             columns: ["product_id"]
             isOneToOne: false
             referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      stock_transfers: {
+        Row: {
+          approved_by: string | null
+          cancelled_at: string | null
+          cancelled_by: string | null
+          created_at: string
+          created_by: string
+          from_branch_id: string
+          id: string
+          product_id: string
+          product_name: string
+          quantity: number
+          received_at: string | null
+          received_by: string | null
+          remarks: string | null
+          status: string
+          to_branch_id: string
+          transfer_date: string
+          transfer_number: string
+          updated_at: string
+        }
+        Insert: {
+          approved_by?: string | null
+          cancelled_at?: string | null
+          cancelled_by?: string | null
+          created_at?: string
+          created_by: string
+          from_branch_id: string
+          id?: string
+          product_id: string
+          product_name: string
+          quantity: number
+          received_at?: string | null
+          received_by?: string | null
+          remarks?: string | null
+          status?: string
+          to_branch_id: string
+          transfer_date?: string
+          transfer_number?: string
+          updated_at?: string
+        }
+        Update: {
+          approved_by?: string | null
+          cancelled_at?: string | null
+          cancelled_by?: string | null
+          created_at?: string
+          created_by?: string
+          from_branch_id?: string
+          id?: string
+          product_id?: string
+          product_name?: string
+          quantity?: number
+          received_at?: string | null
+          received_by?: string | null
+          remarks?: string | null
+          status?: string
+          to_branch_id?: string
+          transfer_date?: string
+          transfer_number?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stock_transfers_from_branch_id_fkey"
+            columns: ["from_branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_transfers_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_transfers_to_branch_id_fkey"
+            columns: ["to_branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
             referencedColumns: ["id"]
           },
         ]
@@ -1205,6 +1605,42 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      cancel_stock_transfer: {
+        Args: { p_transfer_id: string }
+        Returns: undefined
+      }
+      create_stock_transfer: {
+        Args: {
+          p_from_branch_id: string
+          p_product_id: string
+          p_quantity: number
+          p_remarks?: string
+          p_to_branch_id: string
+        }
+        Returns: string
+      }
+      get_active_announcements: {
+        Args: never
+        Returns: {
+          created_at: string
+          created_by: string
+          expires_at: string | null
+          id: string
+          is_active: boolean
+          message: string
+          priority: string
+          target_branch_id: string | null
+          target_type: string
+          title: string
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "announcements"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       get_user_roles: {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["app_role"][]
@@ -1217,6 +1653,53 @@ export type Database = {
         Returns: boolean
       }
       is_admin: { Args: { _user_id: string }; Returns: boolean }
+      next_stock_transfer_number: { Args: never; Returns: string }
+      process_production: {
+        Args: {
+          p_bales: number
+          p_branch_id: string
+          p_faulty_bottles: number
+          p_good_bottles: number
+          p_notes?: string
+          p_prod_name: string
+          p_product_id: string
+          p_quantity_processed: number
+          p_recorded_by: string
+          p_spec_name: string
+          p_specification_id: string
+        }
+        Returns: string
+      }
+      receive_stock_transfer: {
+        Args: { p_transfer_id: string }
+        Returns: undefined
+      }
+      record_bottle_production: {
+        Args: {
+          p_bottle_specification_id: string
+          p_branch_id: string
+          p_faulty: number
+          p_finished_product_id: string
+          p_notes?: string
+          p_processed: number
+          p_recorded_by: string
+        }
+        Returns: string
+      }
+      record_raw_bottle_purchase: {
+        Args: {
+          p_bales: number
+          p_bottle_specification_id: string
+          p_branch_id: string
+          p_buying_price: number
+          p_payment_mode: Database["public"]["Enums"]["payment_mode"]
+          p_recorded_by: string
+          p_supplier_id: string
+          p_supplier_name: string
+        }
+        Returns: string
+      }
+      set_factory_branch: { Args: { p_branch_id: string }; Returns: undefined }
     }
     Enums: {
       adjustment_type: "increase" | "decrease"
@@ -1224,6 +1707,7 @@ export type Database = {
       approval_status: "pending" | "approved" | "rejected"
       discount_type: "percentage" | "fixed"
       payment_mode: "Cash" | "Mpesa" | "Credit"
+      reconciliation_status: "Pending" | "Approved" | "Rejected"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1356,6 +1840,7 @@ export const Constants = {
       approval_status: ["pending", "approved", "rejected"],
       discount_type: ["percentage", "fixed"],
       payment_mode: ["Cash", "Mpesa", "Credit"],
+      reconciliation_status: ["Pending", "Approved", "Rejected"],
     },
   },
 } as const
