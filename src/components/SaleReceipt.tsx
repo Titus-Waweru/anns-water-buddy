@@ -1,6 +1,7 @@
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Printer, X } from "lucide-react";
+import logo from "@/assets/logo.jpg";
 
 interface CartItemReceipt {
   productName: string;
@@ -24,11 +25,14 @@ interface ReceiptData {
   totalLoyaltyPoints?: number;
   mpesaReceipt?: string | null;
   cashierName?: string | null;
+  cashierId?: string | null;
   branchName?: string | null;
   items?: CartItemReceipt[];
   totalCost?: number;
   expectedProfit?: number;
   loyaltyPointsEarned?: number;
+  amountPaid?: number;
+  balance?: number;
   date: string;
 }
 
@@ -38,13 +42,24 @@ interface SaleReceiptProps {
 }
 
 /**
- * 80mm thermal receipt. No logo, no dashboard chrome — just the receipt.
- * The print window contains ONLY the receipt HTML so nothing else is
- * pushed to the printer, and page size is fixed to 80mm to prevent
- * extra blank pages.
+ * 80mm thermal receipt. The print window contains ONLY the receipt HTML so
+ * nothing else is pushed to the printer, and page size is fixed to 80mm to
+ * prevent extra blank pages.
  */
 export default function SaleReceipt({ data, onClose }: SaleReceiptProps) {
   const hasItems = data.items && data.items.length > 0;
+  const logoSrc = typeof window !== "undefined" && logo.startsWith("/")
+    ? `${window.location.origin}${logo}`
+    : logo;
+
+  const amountPaid =
+    typeof data.amountPaid === "number"
+      ? data.amountPaid
+      : data.paymentMode === "Credit"
+        ? 0
+        : data.finalAmount;
+  const balance =
+    typeof data.balance === "number" ? data.balance : Math.max(0, data.finalAmount - amountPaid);
 
   const handlePrint = () => {
     const printContent = document.getElementById("receipt-content");
@@ -63,11 +78,13 @@ export default function SaleReceipt({ data, onClose }: SaleReceiptProps) {
         .row { display: flex; justify-content: space-between; gap: 6px; }
         .sm { font-size: 11px; }
         .lg { font-size: 14px; }
+        .logo { display: block; margin: 0 auto 2px; width: 18mm; height: auto;
+                filter: grayscale(100%) contrast(140%); }
         h1,h2,h3,p { margin: 0; padding: 0; }
         @media print { body { width: 72mm; } }
       </style></head><body>
       ${printContent.innerHTML}
-      <script>window.onload=function(){window.print();setTimeout(function(){window.close();},300);};<\/script>
+      <script>window.onload=function(){setTimeout(function(){window.print();setTimeout(function(){window.close();},300);},250);};<\/script>
       </body></html>`);
     win.document.close();
   };
@@ -78,7 +95,9 @@ export default function SaleReceipt({ data, onClose }: SaleReceiptProps) {
         id="receipt-content"
         className="font-mono text-xs bg-background p-3 rounded-lg border max-w-[300px] mx-auto"
       >
+        <img src={logoSrc} alt="Wonder Aqua" className="logo" width={68} />
         <div className="center bold lg">WONDER AQUA LTD</div>
+        <div className="center sm">Refreshing. Trusted. Wonder.</div>
         <div className="center sm">P.O BOX 455-00520 RUAI</div>
         <div className="center sm">Tel: 0715670632</div>
         <div className="line" />
@@ -91,12 +110,6 @@ export default function SaleReceipt({ data, onClose }: SaleReceiptProps) {
           <span>Date</span>
           <span>{format(new Date(data.date), "dd/MM/yy HH:mm")}</span>
         </div>
-        {data.cashierName && (
-          <div className="row sm">
-            <span>Served By</span>
-            <span>{data.cashierName}</span>
-          </div>
-        )}
         {data.branchName && (
           <div className="row sm">
             <span>Branch</span>
@@ -164,18 +177,14 @@ export default function SaleReceipt({ data, onClose }: SaleReceiptProps) {
           <span>KSh {data.finalAmount.toLocaleString()}</span>
         </div>
 
-        {data.totalCost !== undefined && (
-          <div className="row sm">
-            <span>Total Cost</span>
-            <span>{data.totalCost.toLocaleString()}</span>
-          </div>
-        )}
-        {data.expectedProfit !== undefined && (
-          <div className="row sm">
-            <span>Expected Profit</span>
-            <span>{data.expectedProfit.toLocaleString()}</span>
-          </div>
-        )}
+        <div className="row">
+          <span>Amount Paid</span>
+          <span>KSh {amountPaid.toLocaleString()}</span>
+        </div>
+        <div className="row">
+          <span>Balance</span>
+          <span>KSh {balance.toLocaleString()}</span>
+        </div>
 
         <div className="line" />
 
@@ -189,6 +198,11 @@ export default function SaleReceipt({ data, onClose }: SaleReceiptProps) {
             <span>{data.mpesaReceipt}</span>
           </div>
         )}
+
+        <div className="line" />
+        <div className="sm bold">Served By:</div>
+        <div className="sm">{data.cashierName || "—"}</div>
+        {data.cashierId && <div className="sm">Employee ID: {data.cashierId}</div>}
 
         {(data.loyaltyPointsEarned !== undefined && data.loyaltyPointsEarned > 0) || (typeof data.totalLoyaltyPoints === "number") ? (
           <>
@@ -225,9 +239,8 @@ export default function SaleReceipt({ data, onClose }: SaleReceiptProps) {
         )}
 
         <div className="line" />
-        <div className="center sm bold">Thank you for supporting</div>
-        <div className="center sm bold">Wonder Aqua Ltd.</div>
-        <div className="center sm">Activated Spirit In You</div>
+        <div className="center sm bold">Thank you for choosing Wonder Aqua.</div>
+        <div className="center sm">We look forward to serving you again.</div>
       </div>
 
       <div className="flex gap-2">
