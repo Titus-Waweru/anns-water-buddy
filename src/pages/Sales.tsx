@@ -305,69 +305,93 @@ export default function Sales() {
 
       if (form.paymentMode === "Mpesa" && form.mpesaEntryMode === "manual") {
         const code = form.mpesaCode.trim().toUpperCase();
-        const { data: dup } = await supabase
-          .from("payments")
-          .select("id")
-          .eq("mpesa_receipt", code)
-          .maybeSingle();
-        if (dup) {
-          toast.error("That M-Pesa transaction code has already been recorded.");
-          return;
-        }
+
+        // Create the sale PENDING first — the RPC settles it atomically.
         let sale: any;
-      if (isCartSale) {
-        sale = await addCartSale({
-          ...saleHeader,
-          branch_id: effectiveBranchId,
-          recorded_by: user?.id,
-          payment_status: "PAID",
-          idempotency_key: idempotencyKey,
-          items: saleItemsPayload,
-        } as any);
-        if (!sale) {
-          toast.error("Could not create sale");
-          return;
-        }
-      } else {
-        const { data: singleSale, error } = await supabase
-          .from("sales")
-          .insert({
+        if (isCartSale) {
+          sale = await addCartSale({
             ...saleHeader,
             branch_id: effectiveBranchId,
             recorded_by: user?.id,
-            payment_status: "PAID",
+            payment_status: "PENDING",
             idempotency_key: idempotencyKey,
-          })
-          .select()
-          .single();
-        if (error || !singleSale) {
-          toast.error(error?.message || "Could not create sale");
+            items: saleItemsPayload,
+          } as any);
+          if (!sale) {
+            toast.error("Could not create sale");
+            return;
+          }
+        } else {
+          const { data: singleSale, error } = await supabase
+            .from("sales")
+            .insert({
+              ...saleHeader,
+              branch_id: effectiveBranchId,
+              recorded_by: user?.id,
+              payment_status: "PENDING",
+              idempotency_key: idempotencyKey,
+            })
+            .select()
+            .single();
+          if (error || !singleSale) {
+            if ((error as any)?.code === "23505") {
+              toast.info("This sale is already being processed.");
+            } else {
+              toast.error(error?.message || "Could not create sale");
+            }
+            return;
+          }
+          sale = singleSale;
+        }
+
+        const { error: rpcError } = await (supabase as any).rpc("record_manual_mpesa_payment", {
+          p_sale_id: sale.id,
+          p_mpesa_receipt: code,
+          p_phone_number: mpesaPhone.trim(),
+          p_amount: finalAmount,
+          p_payment_time: new Date().toISOString(),
+          p_notes: null,
+          p_message_reference: null,
+          p_branch_id: effectiveBranchId,
+        });
+
+        if (rpcError) {
+          // Sale stays PENDING and un-deducted — nothing is left half-applied.
+          toast.error(rpcError.message || "Could not record the manual M-Pesa payment.");
+          await refetch();
           return;
         }
-        sale = singleSale;
-      }
-      const messageRef = `MANUAL-${sale.id.slice(0, 8).toUpperCase()}-${Date.now()}`;
-      await supabase.from("payments").insert({
-        provider: "coop",
-        sale_id: sale.id,
-          message_reference: messageRef,
-          transaction_currency: "KES",
-          initiated_by: user?.id || null,
-          branch_id: effectiveBranchId,
-          narration: `Manual M-Pesa ${code}`,
-          status: "SUCCESS",
-          payment_method: "MPESA_MANUAL",
-          payment_source: "Manual Entry",
-          mpesa_receipt: code,
-          payment_time: new Date().toISOString(),
-          transaction_date: new Date().toISOString(),
-          phone_number: mpesaPhone.trim(),
-          amount: finalAmount,
-          entered_by: user?.id || null,
-          result_code: "0",
-          result_description: "Manual M-Pesa entry",
+
+        const manualPoints = form.customerId ? Math.floor(finalAmount / 100) : 0;
+        setReceiptData({
+          id: sale.id,
+          customerName: selectedCustomer?.name || "Walk-in",
+          productName: isCartSale ? `${cartItems.length} items` : selectedProduct!.name,
+          quantity: isCartSale ? totalCartQuantity : form.quantity,
+          sellingPrice: isCartSale ? cartItems[0].sellingPrice : selectedProduct!.selling_price,
+          totalAmount: subtotal,
+          discountAmount,
+          finalAmount,
+          paymentMode: "Mpesa",
+          profit,
+          loyaltyPoints: manualPoints,
+          totalLoyaltyPoints: (selectedCustomer?.loyalty_points || 0) + manualPoints,
+          loyaltyPointsEarned: manualPoints,
+          branchName: branches.find(b => b.id === effectiveBranchId)?.name || "",
+          cashierName: profile?.full_name || "",
+          mpesaReceipt: code,
+          items: isCartSale ? cartItems.map(ci => ({
+            productName: ci.productName,
+            quantity: ci.quantity,
+            sellingPrice: ci.sellingPrice,
+            subtotal: ci.subtotal,
+          })) : undefined,
+          totalCost: isCartSale ? totalCost : undefined,
+          expectedProfit: isCartSale ? totalExpectedProfit : undefined,
+          date: new Date().toISOString(),
         });
-        await finalizeCartSale(sale.id);
+
+        await refetch();
         toast.success("Manual M-Pesa payment recorded.");
         idempotencyKeyRef.current = null;
         setForm({ customerId: "", productId: "", quantity: 1, discountType: "fixed", discountValue: 0, paymentMode: "Cash", mpesaEntryMode: "stk", mpesaCode: "" });
@@ -376,6 +400,7 @@ export default function Sales() {
         setOpen(false);
         return;
       }
+
 
       if (form.paymentMode === "Mpesa") {
         let sale: any;
