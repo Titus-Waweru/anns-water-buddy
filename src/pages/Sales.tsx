@@ -14,6 +14,8 @@ import { format } from "date-fns";
 import { toast } from "sonner";
 import SaleReceipt from "@/components/SaleReceipt";
 import ProductSearch from "@/components/ProductSearch";
+import CustomerSearch from "@/components/CustomerSearch";
+
 
 
 type PaymentMode = "Cash" | "Mpesa" | "Credit";
