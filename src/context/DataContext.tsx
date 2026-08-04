@@ -270,53 +270,17 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   }, [fetchAll, products, customers, effectiveBranchId, user]);
 
   const finalizeSale = useCallback(async (saleId: string) => {
-    const { data: sale } = await supabase.from("sales").select("*").eq("id", saleId).maybeSingle();
-    if (!sale) return;
-
-    const { data: items } = await supabase.from("sale_items").select("*").eq("sale_id", saleId);
-    if (items && items.length > 0) {
-      for (const item of items) {
-        const product = products.find(p => p.id === item.product_id);
-        if (product) {
-          await supabase.from("products").update({ quantity: Math.max(0, product.quantity - item.quantity) }).eq("id", item.product_id);
-        }
-        await supabase.from("inventory_logs").insert({
-          product_id: item.product_id,
-          product_name: item.product_name,
-          type: "OUT",
-          quantity: item.quantity,
-          reference: `Sale to ${sale.customer_name || "Walk-in"}`,
-          date: sale.date,
-          branch_id: sale.branch_id || effectiveBranchId,
-        });
-      }
-    } else {
-      const product = products.find(p => p.id === sale.product_id);
-      if (product) {
-        await supabase.from("products").update({ quantity: Math.max(0, product.quantity - sale.quantity) }).eq("id", sale.product_id);
-      }
-      await supabase.from("inventory_logs").insert({
-        product_id: sale.product_id,
-        product_name: sale.product_name,
-        type: "OUT",
-        quantity: sale.quantity,
-        reference: `Sale to ${sale.customer_name || "Walk-in"}`,
-        date: sale.date,
-        branch_id: sale.branch_id || effectiveBranchId,
-      });
+    // Single atomic, idempotent settlement: stock deduction, inventory logs,
+    // credit balance and loyalty points all happen inside one DB transaction.
+    const { error } = await (supabase as any).rpc("finalize_sale_payment", { p_sale_id: saleId });
+    if (error) {
+      console.error("finalize_sale_payment failed", error);
+      toast.error(error.message || "Could not finalize the sale. It stays pending — please retry.");
+      throw error;
     }
-
-    if (sale.payment_mode === "Credit" && sale.customer_id) {
-      const cust = customers.find(c => c.id === sale.customer_id);
-      if (cust) {
-        await supabase.from("customers").update({
-          credit_balance: cust.credit_balance + sale.final_amount,
-        }).eq("id", sale.customer_id);
-      }
-    }
-
     fetchAll();
-  }, [fetchAll, products, customers, effectiveBranchId]);
+  }, [fetchAll]);
+
 
   const addCartSale = useCallback(async (payload: Database["public"]["Tables"]["sales"]["Insert"] & { items: DbSaleItemInsert[] }) => {
     if (!navigator.onLine) {
