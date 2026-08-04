@@ -1111,6 +1111,7 @@ export type Database = {
           final_amount: number
           id: string
           idempotency_key: string | null
+          inventory_applied: boolean
           payment_mode: Database["public"]["Enums"]["payment_mode"]
           payment_status: string
           product_id: string
@@ -1134,6 +1135,7 @@ export type Database = {
           final_amount: number
           id?: string
           idempotency_key?: string | null
+          inventory_applied?: boolean
           payment_mode?: Database["public"]["Enums"]["payment_mode"]
           payment_status?: string
           product_id: string
@@ -1157,6 +1159,7 @@ export type Database = {
           final_amount?: number
           id?: string
           idempotency_key?: string | null
+          inventory_applied?: boolean
           payment_mode?: Database["public"]["Enums"]["payment_mode"]
           payment_status?: string
           product_id?: string
@@ -1619,6 +1622,7 @@ export type Database = {
         }
         Returns: string
       }
+      finalize_sale_payment: { Args: { p_sale_id: string }; Returns: Json }
       get_active_announcements: {
         Args: never
         Returns: {
@@ -1654,22 +1658,6 @@ export type Database = {
       }
       is_admin: { Args: { _user_id: string }; Returns: boolean }
       next_stock_transfer_number: { Args: never; Returns: string }
-      process_production: {
-        Args: {
-          p_bales: number
-          p_branch_id: string
-          p_faulty_bottles: number
-          p_good_bottles: number
-          p_notes?: string
-          p_prod_name: string
-          p_product_id: string
-          p_quantity_processed: number
-          p_recorded_by: string
-          p_spec_name: string
-          p_specification_id: string
-        }
-        Returns: string
-      }
       receive_stock_transfer: {
         Args: { p_transfer_id: string }
         Returns: undefined
@@ -1685,6 +1673,19 @@ export type Database = {
           p_recorded_by: string
         }
         Returns: string
+      }
+      record_manual_mpesa_payment: {
+        Args: {
+          p_amount: number
+          p_branch_id?: string
+          p_message_reference?: string
+          p_mpesa_receipt: string
+          p_notes?: string
+          p_payment_time?: string
+          p_phone_number: string
+          p_sale_id: string
+        }
+        Returns: Json
       }
       record_raw_bottle_purchase: {
         Args: {
