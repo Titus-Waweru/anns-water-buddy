@@ -791,14 +791,17 @@ export default function Sales() {
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <Label>Customer (optional)</Label>
-                <Select value={form.customerId} onValueChange={v => setForm({ ...form, customerId: v })}>
-                  <SelectTrigger><SelectValue placeholder="Walk-in customer" /></SelectTrigger>
-                  <SelectContent>
-                    {customers.map(c => (
-                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <CustomerSearch
+                  customers={customers}
+                  value={form.customerId}
+                  onChange={v => setForm({ ...form, customerId: v })}
+                />
+                {selectedCustomer && (
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Credit balance: KSh {Number(selectedCustomer.credit_balance || 0).toLocaleString()} · {selectedCustomer.loyalty_points || 0} pts
+                  </p>
+                )}
+
               </div>
               <div>
                 <Label>Product *</Label>
