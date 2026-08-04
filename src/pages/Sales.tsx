@@ -593,42 +593,38 @@ export default function Sales() {
     setManualSubmitting(true);
     try {
       const paymentTimeIso = new Date(manualForm.paymentTime).toISOString();
-      const resp = await fetch("/api/mpesa-manual-entry", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          sale_id: stkPending.saleId,
-          message_reference: stkPending.messageRef,
-          mpesa_receipt: code,
-          phone_number: manualForm.phone.trim(),
-          amount: Number(manualForm.amount),
-          payment_time: paymentTimeIso,
-          transaction_date: paymentTimeIso,
-          branch_id: effectiveBranchId,
-          entered_by: user?.id || null,
-          notes: manualForm.notes || null,
-          narration: `Manual M-Pesa ${code}`,
-        }),
+      const { error } = await (supabase as any).rpc("record_manual_mpesa_payment", {
+        p_sale_id: stkPending.saleId,
+        p_mpesa_receipt: code,
+        p_phone_number: manualForm.phone.trim(),
+        p_amount: Number(manualForm.amount),
+        p_payment_time: paymentTimeIso,
+        p_notes: manualForm.notes || null,
+        p_message_reference: stkPending.messageRef,
+        p_branch_id: effectiveBranchId,
       });
 
-      const data = await resp.json();
-      if (!resp.ok || !data?.ok) {
-        toast.error(data?.error || "Could not save manual payment.");
+      if (error) {
+        toast.error(error.message || "Could not save manual payment.");
         return;
       }
 
-      toast.success("Manual M-Pesa payment recorded.");
+      if (pollRef.current) window.clearInterval(pollRef.current);
+      toast.success("Manual M-Pesa payment recorded — sale completed.");
       await refetch();
       setManualMode(false);
       setStkPending(null);
       setStkStatus("idle");
+      idempotencyKeyRef.current = null;
+      setForm({ customerId: "", productId: "", quantity: 1, discountType: "fixed", discountValue: 0, paymentMode: "Cash", mpesaEntryMode: "stk", mpesaCode: "" });
+      setCartItems([]);
+      setMpesaPhone("");
       setOpen(false);
     } finally {
       setManualSubmitting(false);
     }
   };
+
 
 
 
