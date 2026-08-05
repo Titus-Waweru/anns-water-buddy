@@ -266,7 +266,7 @@ Deno.serve(async (req) => {
 
     const { data: payment } = await admin
       .from("payments")
-      .select("id, sale_id, status, message_reference")
+      .select("id, sale_id, status, message_reference, created_at")
       .eq("message_reference", messageReference)
       .maybeSingle();
 
