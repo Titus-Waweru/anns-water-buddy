@@ -443,6 +443,32 @@ Deno.serve(async (req) => {
       );
     }
 
+    // --- Pre-flight validation (fail fast, before touching the bank) ---
+    const normalizedPhone = normalizePhone(phone);
+    if (!isValidKenyanMsisdn(normalizedPhone)) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          error_code: "INVALID_PHONE",
+          message: "Enter a valid Kenyan mobile number (07XXXXXXXX / 01XXXXXXXX).",
+          correlation_id: correlationId,
+        }),
+        { status: 400, headers: respHeaders },
+      );
+    }
+    const numericAmount = Math.round(Number(amount));
+    if (!Number.isFinite(numericAmount) || numericAmount < 1) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          error_code: "INVALID_AMOUNT",
+          message: "Amount must be a whole number of at least KES 1.",
+          correlation_id: correlationId,
+        }),
+        { status: 400, headers: respHeaders },
+      );
+    }
+
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -462,12 +488,14 @@ Deno.serve(async (req) => {
     const admin = createClient(supabaseUrl, serviceKey);
 
     // Prevent duplicate pending payment for same sale
-    const { data: existing } = await admin
+    const { data: existingRows } = await admin
       .from("payments")
-      .select("id, message_reference, status")
+      .select("id, message_reference, status, created_at, attempt_count")
       .eq("sale_id", sale_id)
       .in("status", ["PENDING", "SUCCESS"])
-      .maybeSingle();
+      .order("created_at", { ascending: false })
+      .limit(1);
+    const existing = existingRows?.[0] ?? null;
 
     if (existing && existing.status === "SUCCESS") {
       return new Response(
@@ -476,9 +504,36 @@ Deno.serve(async (req) => {
       );
     }
 
+    // In-flight guard: a prompt raised in the last 45s is still on the
+    // customer's handset. Re-pushing would double-prompt, so return the
+    // existing reference and let the client keep polling.
+    if (existing) {
+      const ageMs = Date.now() - new Date(existing.created_at as string).getTime();
+      if (ageMs < 45_000) {
+        console.log(JSON.stringify({
+          evt: "stk_duplicate_suppressed",
+          correlationId,
+          sale_id,
+          message_reference: existing.message_reference,
+          age_ms: ageMs,
+        }));
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            duplicate: true,
+            message_reference: existing.message_reference,
+            message: "An M-Pesa prompt is already awaiting the customer.",
+            correlation_id: correlationId,
+          }),
+          { status: 200, headers: respHeaders },
+        );
+      }
+    }
+
     const messageReference =
       existing?.message_reference || `WA-${sale_id.slice(0, 8)}-${Date.now()}`;
-    const normalizedPhone = normalizePhone(phone);
+    const attemptCount = (existing?.attempt_count ?? 0) + 1;
+
 
     // Build the exact Co-op payload
     const callbackUrl =
