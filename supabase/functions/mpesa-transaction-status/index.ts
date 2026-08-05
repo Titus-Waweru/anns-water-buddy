@@ -15,7 +15,7 @@
 // payment records. It reuses the existing PENDING row keyed by message_reference.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import { finalizePaymentCompletion } from "../../../api/lib/payment-finalizer.js";
+import { classifyResult, settleSale } from "../_shared/mpesa-shared.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
