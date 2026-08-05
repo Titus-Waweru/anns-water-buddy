@@ -83,6 +83,9 @@ export default function PaymentsTrace() {
   const { isAdmin, isSuperAdmin, user } = useAuth();
   const { toast } = useToast();
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [health, setHealth] = useState<HealthRow[]>([]);
+  const [reasons, setReasons] = useState<ReasonRow[]>([]);
+
   const [loading, setLoading] = useState(true);
   const [reconciling, setReconciling] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("all");
