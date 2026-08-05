@@ -109,11 +109,47 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Age-out: payments the bank never resolved. After the expiry window the
+    // prompt can no longer be acted on, so stop showing it as pending. The sale
+    // is marked FAILED (never PAID) so stock and balances stay untouched.
+    const expiryMinutes = Number(Deno.env.get("PENDING_EXPIRY_MINUTES") || "60");
+    const expiryIso = new Date(Date.now() - expiryMinutes * 60_000).toISOString();
+    const { data: stale } = await admin
+      .from("payments")
+      .select("id, sale_id, message_reference")
+      .eq("status", "PENDING")
+      .lt("created_at", expiryIso)
+      .limit(200);
+
+    for (const p of stale || []) {
+      try {
+        await admin.from("payments").update({
+          status: "FAILED",
+          error_category: "EXPIRED_NO_RESPONSE",
+          result_code: "EXPIRED",
+          result_description: `No final response from Co-op within ${expiryMinutes} minutes`,
+          completed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }).eq("id", p.id).eq("status", "PENDING");
+        if (p.sale_id) await settleSale(admin, p.sale_id, "FAILED");
+        summary.expired++;
+      } catch (e) {
+        summary.errors++;
+        console.error(JSON.stringify({
+          evt: "reconcile_expire_error",
+          correlationId,
+          payment_id: p.id,
+          message: (e as Error).message,
+        }));
+      }
+    }
+
     console.log(JSON.stringify({
       evt: "reconcile_done",
       ...summary,
       duration_ms: Date.now() - startedAt,
     }));
+
 
     return new Response(JSON.stringify({ ok: true, ...summary }), {
       status: 200,
