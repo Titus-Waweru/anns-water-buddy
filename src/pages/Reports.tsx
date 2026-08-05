@@ -310,13 +310,18 @@ export default function Reports() {
         ]);
         if (pErr) throw pErr;
         if (rErr) throw rErr;
-        const rows = (profiles || []).map(p => ({
-          name: p.full_name,
-          phone: p.phone || "—",
-          role: (userRoles || []).filter(r => r.user_id === p.user_id).map(r => r.role).join(", ") || "—",
-          status: p.status,
-          joined: format(new Date(p.created_at), "dd/MM/yyyy"),
-        }));
+        const superadminIds = new Set(
+          (userRoles || []).filter(r => r.role === "superadmin").map(r => r.user_id)
+        );
+        const rows = (profiles || [])
+          .filter(p => !superadminIds.has(p.user_id))
+          .map(p => ({
+            name: p.full_name,
+            phone: p.phone || "—",
+            role: (userRoles || []).filter(r => r.user_id === p.user_id).map(r => r.role).join(", ") || "—",
+            status: p.status,
+            joined: format(new Date(p.created_at), "dd/MM/yyyy"),
+          }));
         return {
           ...base,
           title: "Staff Report",
