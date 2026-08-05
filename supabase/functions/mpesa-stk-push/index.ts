@@ -2,6 +2,13 @@
 // Creates a PENDING payment record linked to a sale, then triggers STK push.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import {
+  classifyResult,
+  friendlyMessage,
+  isValidKenyanMsisdn,
+  normalizePhone,
+  sleep,
+} from "../_shared/mpesa-shared.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -9,13 +16,55 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-function normalizePhone(p: string): string {
-  const digits = String(p).replace(/\D/g, "");
-  if (digits.startsWith("254")) return digits;
-  if (digits.startsWith("0")) return "254" + digits.slice(1);
-  if (digits.startsWith("7") || digits.startsWith("1")) return "254" + digits;
-  return digits;
+// Bounded retry for transient upstream failures (5xx / network resets).
+// Always replays the IDENTICAL request body, so the same MessageReference is
+// used and the bank can never register two prompts for one attempt.
+async function fetchWithRetry(
+  url: string,
+  init: RequestInit,
+  ctx: { correlationId: string; stage: string; attempts?: number },
+): Promise<{ res: Response; text: string; attempts: number }> {
+  const maxAttempts = ctx.attempts ?? 3;
+  let lastErr: unknown = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await fetch(url, init);
+      const text = await res.text();
+      const transient = res.status === 408 || res.status === 429 || res.status >= 500;
+      if (transient && attempt < maxAttempts) {
+        const delay = 400 * Math.pow(2, attempt - 1);
+        console.warn(JSON.stringify({
+          evt: "upstream_transient_retry",
+          correlationId: ctx.correlationId,
+          stage: ctx.stage,
+          url,
+          status: res.status,
+          attempt,
+          next_delay_ms: delay,
+        }));
+        await sleep(delay);
+        continue;
+      }
+      return { res, text, attempts: attempt };
+    } catch (e) {
+      lastErr = e;
+      if (attempt >= maxAttempts) break;
+      const delay = 400 * Math.pow(2, attempt - 1);
+      console.warn(JSON.stringify({
+        evt: "upstream_network_retry",
+        correlationId: ctx.correlationId,
+        stage: ctx.stage,
+        url,
+        attempt,
+        next_delay_ms: delay,
+        message: (e as Error).message,
+      }));
+      await sleep(delay);
+    }
+  }
+  throw lastErr ?? new Error("Upstream request failed");
 }
+
 
 // Simple in-memory token cache (per edge-runtime instance)
 let cachedToken: { token: string; expiresAt: number } | null = null;
