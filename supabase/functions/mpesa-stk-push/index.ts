@@ -580,14 +580,18 @@ Deno.serve(async (req) => {
       await admin
         .from("payments")
         .update({
-          amount: Number(amount),
+          amount: numericAmount,
           phone_number: normalizedPhone,
           status: "PENDING",
           raw_request: coopPayload,
           correlation_id: correlationId,
+          error_category: null,
+          attempt_count: attemptCount,
+          last_attempt_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })
         .eq("id", existing.id);
+
     } else {
       await admin.from("payments").insert({
         provider: "coop",
