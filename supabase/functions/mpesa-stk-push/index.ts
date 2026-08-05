@@ -356,7 +356,7 @@ async function getCoopTokenFromCfg(cfg: CoopConfig, correlationId: string) {
   }));
 
   const t0 = Date.now();
-  const res = await fetch(url, {
+  const { res, text: bodyText } = await fetchWithRetry(url, {
     method: "POST",
     headers: {
       Authorization: `Basic ${creds}`,
@@ -370,9 +370,9 @@ async function getCoopTokenFromCfg(cfg: CoopConfig, correlationId: string) {
         : {}),
     },
     body: form.toString(),
-  });
-  const bodyText = await res.text();
+  }, { correlationId, stage: "TOKEN" });
   const ms = Date.now() - t0;
+
   console.log(JSON.stringify({
     evt: "coop_token",
     correlationId,
