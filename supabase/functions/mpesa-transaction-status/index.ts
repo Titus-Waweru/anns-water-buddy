@@ -15,7 +15,7 @@
 // payment records. It reuses the existing PENDING row keyed by message_reference.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import { finalizePaymentCompletion } from "../../../api/lib/payment-finalizer.js";
+import { classifyResult, settleSale } from "../_shared/mpesa-shared.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -266,7 +266,7 @@ Deno.serve(async (req) => {
 
     const { data: payment } = await admin
       .from("payments")
-      .select("id, sale_id, status, message_reference")
+      .select("id, sale_id, status, message_reference, created_at")
       .eq("message_reference", messageReference)
       .maybeSingle();
 
@@ -395,30 +395,44 @@ Deno.serve(async (req) => {
     }
 
 
-    const { status, code, desc, receipt } = interpret(data);
+    let { status, code, desc, receipt } = interpret(data);
+
+    // Co-op returns -13 ("Message Reference does not exist") for the first few
+    // seconds after a push, before the reference is registered upstream. That
+    // is a race, not a failure — keep polling for young payments.
+    const ageMs = Date.now() - new Date(payment.created_at as string).getTime();
+    if (String(code) === "-13" && ageMs < 180_000) {
+      status = "PENDING";
+    }
+
+    const category = classifyResult(code, desc, res.status);
 
     // Persist the response so PaymentsTrace shows it and reconcile sees it.
     const update: Record<string, unknown> = {
-      raw_payload: { checked_at: new Date().toISOString(), response: data },
+      raw_payload: { checked_at: new Date().toISOString(), response: data, error_category: category },
       updated_at: new Date().toISOString(),
     };
     if (code) update.result_code = code;
     if (desc) update.result_description = desc;
+    if (receipt) update.mpesa_receipt = receipt;
     if (receipt) update.narration = `Receipt ${receipt}`;
 
     if (status !== "PENDING") {
       update.status = status;
+      update.error_category = category;
+      update.completed_at = new Date().toISOString();
     }
 
     await admin.from("payments").update(update).eq("id", payment.id);
 
-    if (payment.sale_id) {
+    if (payment.sale_id && status !== "PENDING") {
       try {
-        await finalizePaymentCompletion({ supabase: admin, saleId: payment.sale_id, paymentStatus: status === "SUCCESS" ? "PAID" : status });
+        await settleSale(admin, payment.sale_id, status === "SUCCESS" ? "PAID" : status);
       } catch (finalizeError) {
         console.error(JSON.stringify({ evt: "transaction_status_finalize_error", correlationId, sale_id: payment.sale_id, message: String(finalizeError) }));
       }
     }
+
 
     console.log(JSON.stringify({
       evt: "transaction_status_db_update",

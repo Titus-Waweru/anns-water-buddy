@@ -4,6 +4,8 @@
 // Also defensively supports legacy Safaricom Daraja-shaped callbacks.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { classifyResult, settleSale } from "../_shared/mpesa-shared.ts";
+
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -109,10 +111,14 @@ Deno.serve(async (req) => {
     }
 
 
+    const category = classifyResult(resultCode, resultDesc, null);
+
     const { error: upErr } = await admin
       .from("payments")
       .update({
         status,
+        error_category: category,
+        completed_at: new Date().toISOString(),
         result_code: resultCode != null ? String(resultCode) : null,
         result_description: resultDesc,
         transaction_date: transactionDate
@@ -121,6 +127,7 @@ Deno.serve(async (req) => {
         raw_payload: body,
         amount: amount ?? undefined,
         phone_number: phone ?? undefined,
+        mpesa_receipt: receipt ?? undefined,
         narration: receipt ? `Receipt ${receipt}` : undefined,
         updated_at: new Date().toISOString(),
       })
@@ -128,18 +135,17 @@ Deno.serve(async (req) => {
 
     if (upErr) console.error("Payment update error:", upErr);
 
-    // Propagate to sale
+    // Propagate to the sale atomically (stock, loyalty, credit) via the RPC.
     if (payment.sale_id) {
-      const { error: saleErr } = await admin
-        .from("sales")
-        .update({
-          payment_status: isSuccess ? "PAID" : "FAILED",
-        })
-        .eq("id", payment.sale_id);
-      if (saleErr) console.error("Sale update error:", saleErr);
+      try {
+        await settleSale(admin, payment.sale_id, isSuccess ? "PAID" : "FAILED");
+      } catch (saleErr) {
+        console.error("Sale settlement error:", saleErr);
+      }
     }
 
-    console.log(JSON.stringify({ evt: "callback_processed", message_reference: messageReference, status, payment_id: payment.id }));
+    console.log(JSON.stringify({ evt: "callback_processed", message_reference: messageReference, status, error_category: category, payment_id: payment.id }));
+
     return ok();
   } catch (err) {
     console.error("Callback fatal error:", err);

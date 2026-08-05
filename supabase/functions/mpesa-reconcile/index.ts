@@ -10,6 +10,8 @@
 // Triggered every 2 minutes by pg_cron, or manually from the admin trace page.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { settleSale } from "../_shared/mpesa-shared.ts";
+
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -36,7 +38,9 @@ Deno.serve(async (req) => {
     finalized_failed: 0,
     finalized_cancelled: 0,
     still_pending: 0,
+    expired: 0,
     errors: 0,
+
   };
 
   try {
@@ -109,11 +113,47 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Age-out: payments the bank never resolved. After the expiry window the
+    // prompt can no longer be acted on, so stop showing it as pending. The sale
+    // is marked FAILED (never PAID) so stock and balances stay untouched.
+    const expiryMinutes = Number(Deno.env.get("PENDING_EXPIRY_MINUTES") || "60");
+    const expiryIso = new Date(Date.now() - expiryMinutes * 60_000).toISOString();
+    const { data: stale } = await admin
+      .from("payments")
+      .select("id, sale_id, message_reference")
+      .eq("status", "PENDING")
+      .lt("created_at", expiryIso)
+      .limit(200);
+
+    for (const p of stale || []) {
+      try {
+        await admin.from("payments").update({
+          status: "FAILED",
+          error_category: "EXPIRED_NO_RESPONSE",
+          result_code: "EXPIRED",
+          result_description: `No final response from Co-op within ${expiryMinutes} minutes`,
+          completed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }).eq("id", p.id).eq("status", "PENDING");
+        if (p.sale_id) await settleSale(admin, p.sale_id, "FAILED");
+        summary.expired++;
+      } catch (e) {
+        summary.errors++;
+        console.error(JSON.stringify({
+          evt: "reconcile_expire_error",
+          correlationId,
+          payment_id: p.id,
+          message: (e as Error).message,
+        }));
+      }
+    }
+
     console.log(JSON.stringify({
       evt: "reconcile_done",
       ...summary,
       duration_ms: Date.now() - startedAt,
     }));
+
 
     return new Response(JSON.stringify({ ok: true, ...summary }), {
       status: 200,

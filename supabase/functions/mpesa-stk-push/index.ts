@@ -2,6 +2,13 @@
 // Creates a PENDING payment record linked to a sale, then triggers STK push.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import {
+  classifyResult,
+  friendlyMessage,
+  isValidKenyanMsisdn,
+  normalizePhone,
+  sleep,
+} from "../_shared/mpesa-shared.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -9,13 +16,55 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-function normalizePhone(p: string): string {
-  const digits = String(p).replace(/\D/g, "");
-  if (digits.startsWith("254")) return digits;
-  if (digits.startsWith("0")) return "254" + digits.slice(1);
-  if (digits.startsWith("7") || digits.startsWith("1")) return "254" + digits;
-  return digits;
+// Bounded retry for transient upstream failures (5xx / network resets).
+// Always replays the IDENTICAL request body, so the same MessageReference is
+// used and the bank can never register two prompts for one attempt.
+async function fetchWithRetry(
+  url: string,
+  init: RequestInit,
+  ctx: { correlationId: string; stage: string; attempts?: number },
+): Promise<{ res: Response; text: string; attempts: number }> {
+  const maxAttempts = ctx.attempts ?? 3;
+  let lastErr: unknown = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await fetch(url, init);
+      const text = await res.text();
+      const transient = res.status === 408 || res.status === 429 || res.status >= 500;
+      if (transient && attempt < maxAttempts) {
+        const delay = 400 * Math.pow(2, attempt - 1);
+        console.warn(JSON.stringify({
+          evt: "upstream_transient_retry",
+          correlationId: ctx.correlationId,
+          stage: ctx.stage,
+          url,
+          status: res.status,
+          attempt,
+          next_delay_ms: delay,
+        }));
+        await sleep(delay);
+        continue;
+      }
+      return { res, text, attempts: attempt };
+    } catch (e) {
+      lastErr = e;
+      if (attempt >= maxAttempts) break;
+      const delay = 400 * Math.pow(2, attempt - 1);
+      console.warn(JSON.stringify({
+        evt: "upstream_network_retry",
+        correlationId: ctx.correlationId,
+        stage: ctx.stage,
+        url,
+        attempt,
+        next_delay_ms: delay,
+        message: (e as Error).message,
+      }));
+      await sleep(delay);
+    }
+  }
+  throw lastErr ?? new Error("Upstream request failed");
 }
+
 
 // Simple in-memory token cache (per edge-runtime instance)
 let cachedToken: { token: string; expiresAt: number } | null = null;
@@ -307,7 +356,7 @@ async function getCoopTokenFromCfg(cfg: CoopConfig, correlationId: string) {
   }));
 
   const t0 = Date.now();
-  const res = await fetch(url, {
+  const { res, text: bodyText } = await fetchWithRetry(url, {
     method: "POST",
     headers: {
       Authorization: `Basic ${creds}`,
@@ -321,9 +370,9 @@ async function getCoopTokenFromCfg(cfg: CoopConfig, correlationId: string) {
         : {}),
     },
     body: form.toString(),
-  });
-  const bodyText = await res.text();
+  }, { correlationId, stage: "TOKEN" });
   const ms = Date.now() - t0;
+
   console.log(JSON.stringify({
     evt: "coop_token",
     correlationId,
@@ -394,6 +443,32 @@ Deno.serve(async (req) => {
       );
     }
 
+    // --- Pre-flight validation (fail fast, before touching the bank) ---
+    const normalizedPhone = normalizePhone(phone);
+    if (!isValidKenyanMsisdn(normalizedPhone)) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          error_code: "INVALID_PHONE",
+          message: "Enter a valid Kenyan mobile number (07XXXXXXXX / 01XXXXXXXX).",
+          correlation_id: correlationId,
+        }),
+        { status: 400, headers: respHeaders },
+      );
+    }
+    const numericAmount = Math.round(Number(amount));
+    if (!Number.isFinite(numericAmount) || numericAmount < 1) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          error_code: "INVALID_AMOUNT",
+          message: "Amount must be a whole number of at least KES 1.",
+          correlation_id: correlationId,
+        }),
+        { status: 400, headers: respHeaders },
+      );
+    }
+
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -413,12 +488,14 @@ Deno.serve(async (req) => {
     const admin = createClient(supabaseUrl, serviceKey);
 
     // Prevent duplicate pending payment for same sale
-    const { data: existing } = await admin
+    const { data: existingRows } = await admin
       .from("payments")
-      .select("id, message_reference, status")
+      .select("id, message_reference, status, created_at, attempt_count")
       .eq("sale_id", sale_id)
       .in("status", ["PENDING", "SUCCESS"])
-      .maybeSingle();
+      .order("created_at", { ascending: false })
+      .limit(1);
+    const existing = existingRows?.[0] ?? null;
 
     if (existing && existing.status === "SUCCESS") {
       return new Response(
@@ -427,9 +504,36 @@ Deno.serve(async (req) => {
       );
     }
 
+    // In-flight guard: a prompt raised in the last 45s is still on the
+    // customer's handset. Re-pushing would double-prompt, so return the
+    // existing reference and let the client keep polling.
+    if (existing) {
+      const ageMs = Date.now() - new Date(existing.created_at as string).getTime();
+      if (ageMs < 45_000) {
+        console.log(JSON.stringify({
+          evt: "stk_duplicate_suppressed",
+          correlationId,
+          sale_id,
+          message_reference: existing.message_reference,
+          age_ms: ageMs,
+        }));
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            duplicate: true,
+            message_reference: existing.message_reference,
+            message: "An M-Pesa prompt is already awaiting the customer.",
+            correlation_id: correlationId,
+          }),
+          { status: 200, headers: respHeaders },
+        );
+      }
+    }
+
     const messageReference =
       existing?.message_reference || `WA-${sale_id.slice(0, 8)}-${Date.now()}`;
-    const normalizedPhone = normalizePhone(phone);
+    const attemptCount = (existing?.attempt_count ?? 0) + 1;
+
 
     // Build the exact Co-op payload
     const callbackUrl =
@@ -476,14 +580,18 @@ Deno.serve(async (req) => {
       await admin
         .from("payments")
         .update({
-          amount: Number(amount),
+          amount: numericAmount,
           phone_number: normalizedPhone,
           status: "PENDING",
           raw_request: coopPayload,
           correlation_id: correlationId,
+          error_category: null,
+          attempt_count: attemptCount,
+          last_attempt_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })
         .eq("id", existing.id);
+
     } else {
       await admin.from("payments").insert({
         provider: "coop",
@@ -557,6 +665,10 @@ Deno.serve(async (req) => {
         .from("payments")
         .update({
           status: "PENDING",
+          error_category: upstreamStatus === 403 || upstreamStatus === 401
+            ? "UPSTREAM_AUTH"
+            : "UPSTREAM_UNAVAILABLE",
+          last_attempt_at: new Date().toISOString(),
           result_code: String(upstreamStatus),
           result_description:
             `Upstream ${errorCode} (${upstreamStatus}) — ${bodySnippet.slice(0, 180)}`,
@@ -570,6 +682,7 @@ Deno.serve(async (req) => {
             uses_proxy: usesProxy(upstreamUrl),
           },
           updated_at: new Date().toISOString(),
+
         })
         .eq("message_reference", messageReference);
       return new Response(
@@ -589,7 +702,7 @@ Deno.serve(async (req) => {
       const token = await getCoopTokenFromCfg(cfg, correlationId);
 
       const t0 = Date.now();
-      const stkRes = await fetch(cfg.stkUrl, {
+      const { res: stkRes, text: stkText } = await fetchWithRetry(cfg.stkUrl, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -602,10 +715,10 @@ Deno.serve(async (req) => {
             : {}),
         },
         body: JSON.stringify(coopPayload),
-      });
-      const stkText = await stkRes.text();
+      }, { correlationId, stage: "STK" });
       let stkData: any = {};
       try { stkData = JSON.parse(stkText); } catch { /* HTML/error page */ }
+
 
       console.log(JSON.stringify({
         evt: "coop_stk",
@@ -684,34 +797,50 @@ Deno.serve(async (req) => {
             finalText.slice(0, 500).replace(/\s+/g, " ").trim(),
           );
         }
+        const bankCode = finalData?.MessageCode ?? finalData?.ResultCode ?? finalRes.status;
+        const bankDesc =
+          finalData?.MessageDescription || finalData?.ResultDesc ||
+          finalData?.message || "STK push request failed";
+        const category = classifyResult(bankCode, bankDesc, finalRes.status);
         await admin
           .from("payments")
           .update({
             status: "FAILED",
-            result_code: String(finalRes.status),
-            result_description:
-              finalData?.ResultDesc || finalData?.message || "STK push request failed",
+            error_category: category,
+            completed_at: new Date().toISOString(),
+            last_attempt_at: new Date().toISOString(),
+            result_code: String(bankCode),
+            result_description: bankDesc,
             raw_payload: {
               stage: "STK",
               status: finalRes.status,
               url: cfg.stkUrl,
               uses_proxy: usesProxy(cfg.stkUrl),
+              error_category: category,
               response: finalData && Object.keys(finalData).length > 0 ? finalData : finalText.slice(0, 1000),
               correlation_id: correlationId,
             },
+            updated_at: new Date().toISOString(),
           })
           .eq("message_reference", messageReference);
+        await admin
+          .from("sales")
+          .update({ payment_status: "FAILED" })
+          .eq("id", sale_id)
+          .neq("payment_status", "PAID");
         return new Response(
           JSON.stringify({
             ok: false,
             error_code: "STK_FAILED",
-            message: finalData?.ResultDesc || "STK push failed",
+            error_category: category,
+            message: friendlyMessage(category, bankDesc),
             details: finalData,
             correlation_id: correlationId,
           }),
           { status: 200, headers: respHeaders },
         );
       }
+
 
       return new Response(
         JSON.stringify({

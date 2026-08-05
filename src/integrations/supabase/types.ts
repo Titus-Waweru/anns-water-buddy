@@ -555,12 +555,16 @@ export type Database = {
       payments: {
         Row: {
           amount: number
+          attempt_count: number
           branch_id: string | null
+          completed_at: string | null
           correlation_id: string | null
           created_at: string
           entered_by: string | null
+          error_category: string | null
           id: string
           initiated_by: string | null
+          last_attempt_at: string | null
           message_reference: string
           mpesa_receipt: string | null
           narration: string | null
@@ -583,12 +587,16 @@ export type Database = {
         }
         Insert: {
           amount?: number
+          attempt_count?: number
           branch_id?: string | null
+          completed_at?: string | null
           correlation_id?: string | null
           created_at?: string
           entered_by?: string | null
+          error_category?: string | null
           id?: string
           initiated_by?: string | null
+          last_attempt_at?: string | null
           message_reference: string
           mpesa_receipt?: string | null
           narration?: string | null
@@ -611,12 +619,16 @@ export type Database = {
         }
         Update: {
           amount?: number
+          attempt_count?: number
           branch_id?: string | null
+          completed_at?: string | null
           correlation_id?: string | null
           created_at?: string
           entered_by?: string | null
+          error_category?: string | null
           id?: string
           initiated_by?: string | null
+          last_attempt_at?: string | null
           message_reference?: string
           mpesa_receipt?: string | null
           narration?: string | null
@@ -1605,7 +1617,33 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      payment_failure_reasons: {
+        Row: {
+          error_category: string | null
+          last_24_hours: number | null
+          last_7_days: number | null
+          last_seen: string | null
+          latest_description: string | null
+          occurrences: number | null
+        }
+        Relationships: []
+      }
+      payment_health_daily: {
+        Row: {
+          avg_completion_seconds: number | null
+          day: string | null
+          failed: number | null
+          max_completion_seconds: number | null
+          provider_failure_rate: number | null
+          retried_attempts: number | null
+          retried_successful: number | null
+          still_pending: number | null
+          success_rate: number | null
+          successful: number | null
+          total_attempts: number | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       cancel_stock_transfer: {

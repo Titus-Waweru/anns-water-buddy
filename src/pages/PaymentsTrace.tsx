@@ -30,6 +30,30 @@ type Payment = {
   updated_at: string;
 };
 
+type HealthRow = {
+  day: string;
+  total_attempts: number;
+  successful: number;
+  failed: number;
+  still_pending: number;
+  success_rate: number | null;
+  provider_failure_rate: number | null;
+  avg_completion_seconds: number | null;
+  max_completion_seconds: number | null;
+  retried_attempts: number;
+  retried_successful: number;
+};
+
+type ReasonRow = {
+  error_category: string;
+  occurrences: number;
+  last_7_days: number;
+  last_24_hours: number;
+  last_seen: string;
+  latest_description: string | null;
+};
+
+
 const STATUS_META: Record<string, { icon: any; cls: string }> = {
   PENDING: { icon: Clock, cls: "bg-yellow-500/10 text-yellow-600 border-yellow-500/30" },
   SUCCESS: { icon: CheckCircle2, cls: "bg-success/10 text-success border-success/30" },
@@ -59,6 +83,9 @@ export default function PaymentsTrace() {
   const { isAdmin, isSuperAdmin, user } = useAuth();
   const { toast } = useToast();
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [health, setHealth] = useState<HealthRow[]>([]);
+  const [reasons, setReasons] = useState<ReasonRow[]>([]);
+
   const [loading, setLoading] = useState(true);
   const [reconciling, setReconciling] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -119,17 +146,20 @@ export default function PaymentsTrace() {
 
   const load = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from("payments")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(200);
+    const [{ data, error }, healthRes, reasonRes] = await Promise.all([
+      supabase.from("payments").select("*").order("created_at", { ascending: false }).limit(200),
+      (supabase as any).from("payment_health_daily").select("*").limit(14),
+      (supabase as any).from("payment_failure_reasons").select("*").limit(15),
+    ]);
     if (error) toast({ title: "Failed to load payments", description: error.message, variant: "destructive" });
     setPayments((data || []) as Payment[]);
+    setHealth((healthRes?.data || []) as HealthRow[]);
+    setReasons((reasonRes?.data || []) as ReasonRow[]);
     setLoading(false);
   };
 
   useEffect(() => { load(); }, []);
+
 
   // Live updates via realtime channel
   useEffect(() => {
@@ -147,7 +177,7 @@ export default function PaymentsTrace() {
       if (error) throw error;
       toast({
         title: "Reconciliation complete",
-        description: `Scanned ${data?.scanned ?? 0} · finalized ${data?.finalized_success ?? 0} success / ${data?.finalized_failed ?? 0} failed · aged out ${data?.aged_out ?? 0}`,
+        description: `Scanned ${data?.scanned ?? 0} · finalized ${data?.finalized_success ?? 0} success / ${data?.finalized_failed ?? 0} failed · expired ${data?.expired ?? 0}`,
       });
       await load();
     } catch (e: any) {
@@ -202,7 +232,97 @@ export default function PaymentsTrace() {
         </div>
       </div>
 
+      {health[0] && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <Card><CardContent className="pt-6">
+            <p className="text-xs text-muted-foreground uppercase tracking-wider">Success rate today</p>
+            <p className="text-3xl font-bold text-success">{health[0].success_rate ?? 0}%</p>
+            <p className="text-xs text-muted-foreground mt-1">{health[0].successful} of {health[0].total_attempts} attempts</p>
+          </CardContent></Card>
+          <Card><CardContent className="pt-6">
+            <p className="text-xs text-muted-foreground uppercase tracking-wider">Avg completion</p>
+            <p className="text-3xl font-bold">{health[0].avg_completion_seconds ?? 0}s</p>
+            <p className="text-xs text-muted-foreground mt-1">Slowest {health[0].max_completion_seconds ?? 0}s</p>
+          </CardContent></Card>
+          <Card><CardContent className="pt-6">
+            <p className="text-xs text-muted-foreground uppercase tracking-wider">Provider failures</p>
+            <p className="text-3xl font-bold text-destructive">{health[0].provider_failure_rate ?? 0}%</p>
+            <p className="text-xs text-muted-foreground mt-1">Upstream / gateway issues</p>
+          </CardContent></Card>
+          <Card><CardContent className="pt-6">
+            <p className="text-xs text-muted-foreground uppercase tracking-wider">Retry recovery</p>
+            <p className="text-3xl font-bold">{health[0].retried_successful}/{health[0].retried_attempts}</p>
+            <p className="text-xs text-muted-foreground mt-1">Retried attempts that succeeded</p>
+          </CardContent></Card>
+        </div>
+      )}
+
+      {reasons.length > 0 && (
+        <Card>
+          <CardHeader><CardTitle className="text-base">Failure reasons (ranked by impact)</CardTitle></CardHeader>
+          <CardContent className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Category</TableHead>
+                  <TableHead className="text-right">24h</TableHead>
+                  <TableHead className="text-right">7 days</TableHead>
+                  <TableHead className="text-right">All time</TableHead>
+                  <TableHead>Latest message</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {reasons.map((r) => (
+                  <TableRow key={r.error_category}>
+                    <TableCell className="font-medium">{r.error_category.replace(/_/g, " ")}</TableCell>
+                    <TableCell className="text-right">{r.last_24_hours}</TableCell>
+                    <TableCell className="text-right">{r.last_7_days}</TableCell>
+                    <TableCell className="text-right">{r.occurrences}</TableCell>
+                    <TableCell className="max-w-xs truncate text-xs text-muted-foreground">{r.latest_description || "—"}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
+      {health.length > 1 && (
+        <Card>
+          <CardHeader><CardTitle className="text-base">Daily payment health</CardTitle></CardHeader>
+          <CardContent className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Day</TableHead>
+                  <TableHead className="text-right">Attempts</TableHead>
+                  <TableHead className="text-right">Success</TableHead>
+                  <TableHead className="text-right">Failed</TableHead>
+                  <TableHead className="text-right">Pending</TableHead>
+                  <TableHead className="text-right">Rate</TableHead>
+                  <TableHead className="text-right">Avg time</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {health.map((h) => (
+                  <TableRow key={h.day}>
+                    <TableCell>{new Date(h.day).toLocaleDateString()}</TableCell>
+                    <TableCell className="text-right">{h.total_attempts}</TableCell>
+                    <TableCell className="text-right text-success">{h.successful}</TableCell>
+                    <TableCell className="text-right text-destructive">{h.failed}</TableCell>
+                    <TableCell className="text-right text-yellow-600">{h.still_pending}</TableCell>
+                    <TableCell className="text-right font-medium">{h.success_rate ?? 0}%</TableCell>
+                    <TableCell className="text-right">{h.avg_completion_seconds ?? 0}s</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
         <Card><CardContent className="pt-6">
           <p className="text-xs text-muted-foreground uppercase tracking-wider">Pending</p>
           <p className="text-3xl font-bold text-yellow-600">{pending.length}</p>
