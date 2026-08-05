@@ -119,17 +119,20 @@ export default function PaymentsTrace() {
 
   const load = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from("payments")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(200);
+    const [{ data, error }, healthRes, reasonRes] = await Promise.all([
+      supabase.from("payments").select("*").order("created_at", { ascending: false }).limit(200),
+      (supabase as any).from("payment_health_daily").select("*").limit(14),
+      (supabase as any).from("payment_failure_reasons").select("*").limit(15),
+    ]);
     if (error) toast({ title: "Failed to load payments", description: error.message, variant: "destructive" });
     setPayments((data || []) as Payment[]);
+    setHealth((healthRes?.data || []) as HealthRow[]);
+    setReasons((reasonRes?.data || []) as ReasonRow[]);
     setLoading(false);
   };
 
   useEffect(() => { load(); }, []);
+
 
   // Live updates via realtime channel
   useEffect(() => {
