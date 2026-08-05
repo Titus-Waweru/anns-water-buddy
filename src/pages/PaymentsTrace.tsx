@@ -30,6 +30,30 @@ type Payment = {
   updated_at: string;
 };
 
+type HealthRow = {
+  day: string;
+  total_attempts: number;
+  successful: number;
+  failed: number;
+  still_pending: number;
+  success_rate: number | null;
+  provider_failure_rate: number | null;
+  avg_completion_seconds: number | null;
+  max_completion_seconds: number | null;
+  retried_attempts: number;
+  retried_successful: number;
+};
+
+type ReasonRow = {
+  error_category: string;
+  occurrences: number;
+  last_7_days: number;
+  last_24_hours: number;
+  last_seen: string;
+  latest_description: string | null;
+};
+
+
 const STATUS_META: Record<string, { icon: any; cls: string }> = {
   PENDING: { icon: Clock, cls: "bg-yellow-500/10 text-yellow-600 border-yellow-500/30" },
   SUCCESS: { icon: CheckCircle2, cls: "bg-success/10 text-success border-success/30" },
