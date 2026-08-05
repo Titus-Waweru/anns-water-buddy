@@ -38,7 +38,9 @@ Deno.serve(async (req) => {
     finalized_failed: 0,
     finalized_cancelled: 0,
     still_pending: 0,
+    expired: 0,
     errors: 0,
+
   };
 
   try {
