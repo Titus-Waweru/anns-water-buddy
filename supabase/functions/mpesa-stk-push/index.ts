@@ -665,6 +665,10 @@ Deno.serve(async (req) => {
         .from("payments")
         .update({
           status: "PENDING",
+          error_category: upstreamStatus === 403 || upstreamStatus === 401
+            ? "UPSTREAM_AUTH"
+            : "UPSTREAM_UNAVAILABLE",
+          last_attempt_at: new Date().toISOString(),
           result_code: String(upstreamStatus),
           result_description:
             `Upstream ${errorCode} (${upstreamStatus}) — ${bodySnippet.slice(0, 180)}`,
@@ -678,6 +682,7 @@ Deno.serve(async (req) => {
             uses_proxy: usesProxy(upstreamUrl),
           },
           updated_at: new Date().toISOString(),
+
         })
         .eq("message_reference", messageReference);
       return new Response(
