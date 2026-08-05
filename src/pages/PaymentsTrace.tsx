@@ -232,7 +232,97 @@ export default function PaymentsTrace() {
         </div>
       </div>
 
+      {health[0] && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <Card><CardContent className="pt-6">
+            <p className="text-xs text-muted-foreground uppercase tracking-wider">Success rate today</p>
+            <p className="text-3xl font-bold text-success">{health[0].success_rate ?? 0}%</p>
+            <p className="text-xs text-muted-foreground mt-1">{health[0].successful} of {health[0].total_attempts} attempts</p>
+          </CardContent></Card>
+          <Card><CardContent className="pt-6">
+            <p className="text-xs text-muted-foreground uppercase tracking-wider">Avg completion</p>
+            <p className="text-3xl font-bold">{health[0].avg_completion_seconds ?? 0}s</p>
+            <p className="text-xs text-muted-foreground mt-1">Slowest {health[0].max_completion_seconds ?? 0}s</p>
+          </CardContent></Card>
+          <Card><CardContent className="pt-6">
+            <p className="text-xs text-muted-foreground uppercase tracking-wider">Provider failures</p>
+            <p className="text-3xl font-bold text-destructive">{health[0].provider_failure_rate ?? 0}%</p>
+            <p className="text-xs text-muted-foreground mt-1">Upstream / gateway issues</p>
+          </CardContent></Card>
+          <Card><CardContent className="pt-6">
+            <p className="text-xs text-muted-foreground uppercase tracking-wider">Retry recovery</p>
+            <p className="text-3xl font-bold">{health[0].retried_successful}/{health[0].retried_attempts}</p>
+            <p className="text-xs text-muted-foreground mt-1">Retried attempts that succeeded</p>
+          </CardContent></Card>
+        </div>
+      )}
+
+      {reasons.length > 0 && (
+        <Card>
+          <CardHeader><CardTitle className="text-base">Failure reasons (ranked by impact)</CardTitle></CardHeader>
+          <CardContent className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Category</TableHead>
+                  <TableHead className="text-right">24h</TableHead>
+                  <TableHead className="text-right">7 days</TableHead>
+                  <TableHead className="text-right">All time</TableHead>
+                  <TableHead>Latest message</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {reasons.map((r) => (
+                  <TableRow key={r.error_category}>
+                    <TableCell className="font-medium">{r.error_category.replace(/_/g, " ")}</TableCell>
+                    <TableCell className="text-right">{r.last_24_hours}</TableCell>
+                    <TableCell className="text-right">{r.last_7_days}</TableCell>
+                    <TableCell className="text-right">{r.occurrences}</TableCell>
+                    <TableCell className="max-w-xs truncate text-xs text-muted-foreground">{r.latest_description || "—"}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
+      {health.length > 1 && (
+        <Card>
+          <CardHeader><CardTitle className="text-base">Daily payment health</CardTitle></CardHeader>
+          <CardContent className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Day</TableHead>
+                  <TableHead className="text-right">Attempts</TableHead>
+                  <TableHead className="text-right">Success</TableHead>
+                  <TableHead className="text-right">Failed</TableHead>
+                  <TableHead className="text-right">Pending</TableHead>
+                  <TableHead className="text-right">Rate</TableHead>
+                  <TableHead className="text-right">Avg time</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {health.map((h) => (
+                  <TableRow key={h.day}>
+                    <TableCell>{new Date(h.day).toLocaleDateString()}</TableCell>
+                    <TableCell className="text-right">{h.total_attempts}</TableCell>
+                    <TableCell className="text-right text-success">{h.successful}</TableCell>
+                    <TableCell className="text-right text-destructive">{h.failed}</TableCell>
+                    <TableCell className="text-right text-yellow-600">{h.still_pending}</TableCell>
+                    <TableCell className="text-right font-medium">{h.success_rate ?? 0}%</TableCell>
+                    <TableCell className="text-right">{h.avg_completion_seconds ?? 0}s</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
         <Card><CardContent className="pt-6">
           <p className="text-xs text-muted-foreground uppercase tracking-wider">Pending</p>
           <p className="text-3xl font-bold text-yellow-600">{pending.length}</p>
