@@ -177,7 +177,7 @@ export default function PaymentsTrace() {
       if (error) throw error;
       toast({
         title: "Reconciliation complete",
-        description: `Scanned ${data?.scanned ?? 0} · finalized ${data?.finalized_success ?? 0} success / ${data?.finalized_failed ?? 0} failed · aged out ${data?.aged_out ?? 0}`,
+        description: `Scanned ${data?.scanned ?? 0} · finalized ${data?.finalized_success ?? 0} success / ${data?.finalized_failed ?? 0} failed · expired ${data?.expired ?? 0}`,
       });
       await load();
     } catch (e: any) {
