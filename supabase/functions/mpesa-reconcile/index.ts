@@ -10,6 +10,8 @@
 // Triggered every 2 minutes by pg_cron, or manually from the admin trace page.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { settleSale } from "../_shared/mpesa-shared.ts";
+
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
