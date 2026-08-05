@@ -697,7 +697,7 @@ Deno.serve(async (req) => {
       const token = await getCoopTokenFromCfg(cfg, correlationId);
 
       const t0 = Date.now();
-      const stkRes = await fetch(cfg.stkUrl, {
+      const { res: stkRes, text: stkText } = await fetchWithRetry(cfg.stkUrl, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -710,10 +710,10 @@ Deno.serve(async (req) => {
             : {}),
         },
         body: JSON.stringify(coopPayload),
-      });
-      const stkText = await stkRes.text();
+      }, { correlationId, stage: "STK" });
       let stkData: any = {};
       try { stkData = JSON.parse(stkText); } catch { /* HTML/error page */ }
+
 
       console.log(JSON.stringify({
         evt: "coop_stk",
