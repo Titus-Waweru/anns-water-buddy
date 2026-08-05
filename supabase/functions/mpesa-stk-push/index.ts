@@ -797,34 +797,50 @@ Deno.serve(async (req) => {
             finalText.slice(0, 500).replace(/\s+/g, " ").trim(),
           );
         }
+        const bankCode = finalData?.MessageCode ?? finalData?.ResultCode ?? finalRes.status;
+        const bankDesc =
+          finalData?.MessageDescription || finalData?.ResultDesc ||
+          finalData?.message || "STK push request failed";
+        const category = classifyResult(bankCode, bankDesc, finalRes.status);
         await admin
           .from("payments")
           .update({
             status: "FAILED",
-            result_code: String(finalRes.status),
-            result_description:
-              finalData?.ResultDesc || finalData?.message || "STK push request failed",
+            error_category: category,
+            completed_at: new Date().toISOString(),
+            last_attempt_at: new Date().toISOString(),
+            result_code: String(bankCode),
+            result_description: bankDesc,
             raw_payload: {
               stage: "STK",
               status: finalRes.status,
               url: cfg.stkUrl,
               uses_proxy: usesProxy(cfg.stkUrl),
+              error_category: category,
               response: finalData && Object.keys(finalData).length > 0 ? finalData : finalText.slice(0, 1000),
               correlation_id: correlationId,
             },
+            updated_at: new Date().toISOString(),
           })
           .eq("message_reference", messageReference);
+        await admin
+          .from("sales")
+          .update({ payment_status: "FAILED" })
+          .eq("id", sale_id)
+          .neq("payment_status", "PAID");
         return new Response(
           JSON.stringify({
             ok: false,
             error_code: "STK_FAILED",
-            message: finalData?.ResultDesc || "STK push failed",
+            error_category: category,
+            message: friendlyMessage(category, bankDesc),
             details: finalData,
             correlation_id: correlationId,
           }),
           { status: 200, headers: respHeaders },
         );
       }
+
 
       return new Response(
         JSON.stringify({
