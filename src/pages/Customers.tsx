@@ -2,6 +2,7 @@ import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { useData } from "@/context/DataContext";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
+import { isValidPaymentRef, normalizePaymentRef } from "@/lib/paymentStatus";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -147,9 +148,9 @@ export default function Customers() {
       return;
     }
     if (payForm.payment_mode === "Mpesa") {
-      const code = payForm.mpesa_receipt.trim().toUpperCase();
-      if (!/^[A-Z0-9]{10}$/.test(code)) {
-        toast({ title: "Enter a valid 10-character M-Pesa code", variant: "destructive" });
+      const code = normalizePaymentRef(payForm.mpesa_receipt);
+      if (!isValidPaymentRef(code)) {
+        toast({ title: "Enter a valid payment reference (6-50 characters)", variant: "destructive" });
         return;
       }
     }
@@ -160,7 +161,7 @@ export default function Customers() {
         customer_id: detailCustomer,
         amount: amt,
         payment_mode: payForm.payment_mode,
-        mpesa_receipt: payForm.payment_mode === "Mpesa" ? payForm.mpesa_receipt.trim().toUpperCase() : null,
+        mpesa_receipt: payForm.payment_mode === "Mpesa" ? normalizePaymentRef(payForm.mpesa_receipt) : null,
         notes: payForm.notes || null,
         recorded_by: user?.id || null,
         branch_id: effectiveBranchId || null,
@@ -507,7 +508,7 @@ export default function Customers() {
                 <div>
                   <Label>M-Pesa Transaction Code *</Label>
                   <Input value={payForm.mpesa_receipt} onChange={e => setPayForm({ ...payForm, mpesa_receipt: e.target.value.toUpperCase() })}
-                    placeholder="e.g. SFE1A2B3C4" maxLength={10} className="font-mono" />
+                    placeholder="e.g. SFE1A2B3C4" maxLength={50} className="font-mono" />
                 </div>
               )}
               <div>

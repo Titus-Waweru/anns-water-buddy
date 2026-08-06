@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect } from "react";
 import { useData } from "@/context/DataContext";
+import { filterPaidSales } from "@/lib/paymentStatus";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -41,7 +42,9 @@ interface Announcement {
 }
 
 export default function Dashboard() {
-  const { products, sales, purchases, customers } = useData();
+  const { products, sales: allSales, purchases, customers } = useData();
+  // Only settled payments contribute to revenue, profit and charts.
+  const sales = filterPaidSales(allSales as any) as typeof allSales;
   const { profile, user, isAdmin, roles } = useAuth();
   const [myTargets, setMyTargets] = useState<UserTarget[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
@@ -147,7 +150,7 @@ export default function Dashboard() {
     }));
   }, [products]);
 
-  const recentSales = sales.slice(0, 5);
+  const recentSales = allSales.slice(0, 5);
   const recentPurchases = purchases.slice(0, 5);
 
   const greeting = () => {

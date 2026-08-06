@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useData } from "@/context/DataContext";
 import { useAuth } from "@/context/AuthContext";
+import { filterPaidSales } from "@/lib/paymentStatus";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -42,7 +43,7 @@ export default function Reports() {
 
   // PENDING sales are not completed transactions — exclude them from every
   // aggregate on this page (revenue, profit, counts, payment totals).
-  const sales = allSales.filter(s => (s as any).payment_status !== "PENDING");
+  const sales = filterPaidSales(allSales as any) as typeof allSales;
 
   const today = new Date();
   const monthStart = startOfMonth(today);
