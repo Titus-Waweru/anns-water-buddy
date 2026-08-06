@@ -368,7 +368,7 @@ export default function Sales() {
         }
 
         const manualPoints = form.customerId ? Math.floor(finalAmount / 100) : 0;
-        setReceiptData({
+        setPendingReceipt({
           id: sale.id,
           customerName: selectedCustomer?.name || "Walk-in",
           productName: isCartSale ? `${cartItems.length} items` : selectedProduct!.name,
@@ -397,7 +397,13 @@ export default function Sales() {
         });
 
         await refetch();
-        toast.success("Manual M-Pesa payment recorded.");
+        setPaymentSuccess({
+          amount: finalAmount,
+          reference: code,
+          date: new Date().toISOString(),
+          method: "M-Pesa (Manual Entry)",
+          customerName: selectedCustomer?.name || "Walk-in",
+        });
         idempotencyKeyRef.current = null;
         setForm({ customerId: "", productId: "", quantity: 1, discountType: "fixed", discountValue: 0, paymentMode: "Cash", mpesaEntryMode: "stk", mpesaCode: "" });
         setCartItems([]);
@@ -615,8 +621,14 @@ export default function Sales() {
       }
 
       if (pollRef.current) window.clearInterval(pollRef.current);
-      toast.success("Manual M-Pesa payment recorded — sale completed.");
       await refetch();
+      setPaymentSuccess({
+        amount: Number(manualForm.amount),
+        reference: code,
+        date: paymentTimeIso,
+        method: "M-Pesa (Manual Entry)",
+        customerName: manualForm.customerName || "Walk-in",
+      });
       setManualMode(false);
       setStkPending(null);
       setStkStatus("idle");
@@ -967,6 +979,12 @@ export default function Sales() {
           </DialogContent>
         </Dialog>
       )}
+
+      <PaymentSuccessDialog
+        data={paymentSuccess}
+        onClose={() => setPaymentSuccess(null)}
+        onPrintReceipt={pendingReceipt ? () => { setPaymentSuccess(null); setReceiptData(pendingReceipt); setPendingReceipt(null); } : undefined}
+      />
 
       {sales.length === 0 ? (
         <Card>
