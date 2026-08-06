@@ -15,6 +15,8 @@ import { toast } from "sonner";
 import SaleReceipt from "@/components/SaleReceipt";
 import ProductSearch from "@/components/ProductSearch";
 import CustomerSearch from "@/components/CustomerSearch";
+import PaymentSuccessDialog, { PaymentSuccessData } from "@/components/PaymentSuccessDialog";
+import { isValidPaymentRef, normalizePaymentRef } from "@/lib/paymentStatus";
 
 
 
@@ -37,6 +39,8 @@ export default function Sales() {
   const { user, profile } = useAuth();
   const [open, setOpen] = useState(false);
   const [receiptData, setReceiptData] = useState<any>(null);
+  const [paymentSuccess, setPaymentSuccess] = useState<PaymentSuccessData | null>(null);
+  const [pendingReceipt, setPendingReceipt] = useState<any>(null);
   const [mpesaPhone, setMpesaPhone] = useState("");
   const [stkPending, setStkPending] = useState<{ saleId: string; messageRef: string; startedAt: number } | null>(null);
   const [stkStatus, setStkStatus] = useState<"idle" | "sending" | "waiting" | "still_processing" | "failed" | "cancelled">("idle");
@@ -261,9 +265,8 @@ export default function Sales() {
       return;
     }
     if (form.paymentMode === "Mpesa" && form.mpesaEntryMode === "manual") {
-      const code = form.mpesaCode.trim().toUpperCase();
-      if (!/^[A-Z0-9]{10}$/.test(code)) {
-        toast.error("Enter a valid 10-character M-Pesa transaction code.");
+      if (!isValidPaymentRef(form.mpesaCode)) {
+        toast.error("Enter a valid payment reference (6-50 letters, numbers or hyphens).");
         return;
       }
     }
@@ -306,7 +309,7 @@ export default function Sales() {
       };
 
       if (form.paymentMode === "Mpesa" && form.mpesaEntryMode === "manual") {
-        const code = form.mpesaCode.trim().toUpperCase();
+        const code = normalizePaymentRef(form.mpesaCode);
 
         // Create the sale PENDING first — the RPC settles it atomically.
         let sale: any;
@@ -583,9 +586,9 @@ export default function Sales() {
       toast.error("No sale is awaiting payment.");
       return;
     }
-    const code = manualForm.mpesaCode.trim().toUpperCase();
-    if (!/^[A-Z0-9]{10}$/.test(code)) {
-      toast.error("Enter a valid 10-character M-Pesa transaction code.");
+    const code = normalizePaymentRef(manualForm.mpesaCode);
+    if (!isValidPaymentRef(code)) {
+      toast.error("Enter a valid payment reference (6-50 letters, numbers or hyphens).");
       return;
     }
     if (!manualForm.phone.trim() || !manualForm.amount || manualForm.amount <= 0) {
@@ -674,7 +677,7 @@ export default function Sales() {
                         value={manualForm.mpesaCode}
                         onChange={e => setManualForm({ ...manualForm, mpesaCode: e.target.value.toUpperCase() })}
                         placeholder="e.g. SFE1A2B3C4"
-                        maxLength={10}
+                        maxLength={50}
                         className="font-mono"
                       />
                       <p className="text-[11px] text-muted-foreground mt-1">10 letters and digits from the M-Pesa SMS.</p>
@@ -866,7 +869,7 @@ export default function Sales() {
                           value={form.mpesaCode}
                           onChange={e => setForm({ ...form, mpesaCode: e.target.value.toUpperCase() })}
                           placeholder="e.g. SFE1A2B3C4"
-                          maxLength={10}
+                          maxLength={50}
                           className="font-mono"
                         />
                         <p className="text-[11px] text-muted-foreground mt-1">
