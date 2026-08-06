@@ -688,7 +688,7 @@ export default function Sales() {
                       <Input
                         value={manualForm.mpesaCode}
                         onChange={e => setManualForm({ ...manualForm, mpesaCode: e.target.value.toUpperCase() })}
-                        placeholder="e.g. SFE1A2B3C4"
+                        placeholder="e.g. SFE1A2B3C4 or BANK-REF-2026-00123"
                         maxLength={50}
                         className="font-mono"
                       />
@@ -880,12 +880,12 @@ export default function Sales() {
                         <Input
                           value={form.mpesaCode}
                           onChange={e => setForm({ ...form, mpesaCode: e.target.value.toUpperCase() })}
-                          placeholder="e.g. SFE1A2B3C4"
+                          placeholder="e.g. SFE1A2B3C4 or BANK-REF-2026-00123"
                           maxLength={50}
                           className="font-mono"
                         />
                         <p className="text-[11px] text-muted-foreground mt-1">
-                          10-character code from the customer's M-Pesa SMS. Duplicates are rejected.
+                          Reference from the customer's M-Pesa or bank SMS (6-50 characters). Duplicates are rejected.
                         </p>
                       </div>
                     )}
