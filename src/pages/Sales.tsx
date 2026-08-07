@@ -149,7 +149,7 @@ export default function Sales() {
     const { data } = await supabase.functions.invoke("mpesa-transaction-status", {
       body: { message_reference: messageRef },
     });
-    return data as { status?: string; result_description?: string } | null;
+    return data as { status?: string; result_description?: string; receipt?: string | null } | null;
   };
 
   useEffect(() => {
@@ -166,8 +166,13 @@ export default function Sales() {
         if (pollRef.current) window.clearInterval(pollRef.current);
         setStkStatus("idle");
         toast.success("Payment confirmed!");
-        await finalizeCartSale(stkPending.saleId);
+        const paidSaleId = stkPending.saleId;
+        await finalizeCartSale(paidSaleId);
+        await showStkReceipt(paidSaleId, data?.receipt);
         setStkPending(null);
+        setForm({ customerId: "", productId: "", quantity: 1, discountType: "fixed", discountValue: 0, paymentMode: "Cash", mpesaEntryMode: "stk", mpesaCode: "" });
+        setCartItems([]);
+        setMpesaPhone("");
         setOpen(false);
         return;
       }
@@ -556,9 +561,20 @@ export default function Sales() {
       const data = await queryStatus(stkPending.messageRef);
       if (data?.status === "SUCCESS") {
         toast.success("Payment confirmed!");
-        await refetch();
+        const paidSaleId = stkPending.saleId;
+        try {
+          // Idempotent RPC — the status check may already have settled the sale,
+          // but the client-side call guarantees finalization with a user JWT.
+          await finalizeCartSale(paidSaleId);
+        } catch (finalizeError) {
+          console.warn("Finalize after status check failed; the sale stays pending and reconcile will settle it.", finalizeError);
+        }
+        await showStkReceipt(paidSaleId, data?.receipt);
         setStkPending(null);
         setStkStatus("idle");
+        setForm({ customerId: "", productId: "", quantity: 1, discountType: "fixed", discountValue: 0, paymentMode: "Cash", mpesaEntryMode: "stk", mpesaCode: "" });
+        setCartItems([]);
+        setMpesaPhone("");
         setOpen(false);
       } else if (data?.status === "FAILED") {
         setStkStatus("failed");
@@ -644,6 +660,105 @@ export default function Sales() {
 
 
 
+
+  // Build a complete receipt from the DB rows (sales header + sale_items).
+  // For cart/bulk sales the sales header only stores the FIRST product, so the
+  // full line-item list must come from sale_items — otherwise the receipt would
+  // silently drop every other product the customer bought.
+  const buildReceiptData = (sale: any, saleItems: any[], opts?: { mpesaReceipt?: string | null }) => {
+    const hasItems = Array.isArray(saleItems) && saleItems.length > 0;
+    const earnedPoints = sale.customer_id ? Math.floor(Number(sale.final_amount) / 100) : 0;
+    const branchName = branches.find(b => b.id === sale.branch_id)?.name || "";
+    const cashierName = profile?.full_name || "";
+    return {
+      id: sale.id,
+      customerName: sale.customer_name || "Walk-in",
+      productName: hasItems ? `${saleItems.length} items` : sale.product_name,
+      quantity: hasItems ? saleItems.reduce((sum: number, i: any) => sum + i.quantity, 0) : sale.quantity,
+      sellingPrice: hasItems ? saleItems[0].selling_price : sale.selling_price,
+      totalAmount: sale.total_amount,
+      discountAmount: sale.discount_amount,
+      finalAmount: sale.final_amount,
+      paymentMode: sale.payment_mode,
+      profit: sale.profit,
+      loyaltyPoints: earnedPoints,
+      loyaltyPointsEarned: earnedPoints,
+      branchName,
+      cashierName,
+      mpesaReceipt: opts?.mpesaReceipt ?? null,
+      items: hasItems ? saleItems.map((i: any) => ({
+        productName: i.product_name,
+        quantity: i.quantity,
+        sellingPrice: i.selling_price,
+        subtotal: i.total_amount,
+      })) : undefined,
+      totalCost: hasItems ? saleItems.reduce((sum: number, i: any) => sum + i.buying_price * i.quantity, 0) : undefined,
+      expectedProfit: hasItems ? saleItems.reduce((sum: number, i: any) => sum + i.profit, 0) : undefined,
+      date: sale.date || sale.created_at || new Date().toISOString(),
+    };
+  };
+
+  // After an STK payment is confirmed, fetch the finalized sale + its line items
+  // (source of truth) and present the PaymentSuccessDialog with a printable
+  // receipt that lists EVERY product, not just the first one in the cart.
+  const showStkReceipt = async (saleId: string, mpesaReceipt?: string | null) => {
+    const [{ data: sale }, { data: saleItems }, { data: payment }] = await Promise.all([
+      (supabase as any).from("sales").select("*").eq("id", saleId).maybeSingle(),
+      (supabase as any).from("sale_items").select("*").eq("sale_id", saleId).order("created_at", { ascending: true }),
+      (supabase as any).from("payments").select("mpesa_receipt").eq("sale_id", saleId).eq("status", "SUCCESS").order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    ]);
+    const receiptCode = mpesaReceipt || payment?.mpesa_receipt || null;
+    if (!sale) {
+      // Rare DB miss — fall back to the in-memory cart so the cashier can still print.
+      if (cartItems.length > 0) {
+        const earned = form.customerId ? Math.floor(finalAmount / 100) : 0;
+        setPendingReceipt({
+          id: saleId,
+          customerName: selectedCustomer?.name || "Walk-in",
+          productName: `${cartItems.length} items`,
+          quantity: totalCartQuantity,
+          sellingPrice: cartItems[0].sellingPrice,
+          totalAmount: subtotal,
+          discountAmount,
+          finalAmount,
+          paymentMode: "Mpesa",
+          profit,
+          loyaltyPoints: earned,
+          loyaltyPointsEarned: earned,
+          branchName: branches.find(b => b.id === effectiveBranchId)?.name || "",
+          cashierName: profile?.full_name || "",
+          mpesaReceipt: receiptCode,
+          items: cartItems.map(ci => ({
+            productName: ci.productName,
+            quantity: ci.quantity,
+            sellingPrice: ci.sellingPrice,
+            subtotal: ci.subtotal,
+          })),
+          date: new Date().toISOString(),
+        });
+      }
+      return;
+    }
+    setPendingReceipt(buildReceiptData(sale, saleItems || [], { mpesaReceipt: receiptCode }));
+    setPaymentSuccess({
+      amount: Number(sale.final_amount),
+      reference: receiptCode || "STK",
+      date: new Date().toISOString(),
+      method: "M-Pesa (STK Push)",
+      customerName: sale.customer_name || "Walk-in",
+    });
+  };
+
+  // Reprint from the sales history list — loads sale_items so cart/bulk receipts
+  // show every item instead of just the first product stored on the sales row.
+  const printSaleReceipt = async (s: any) => {
+    const { data: saleItems } = await (supabase as any)
+      .from("sale_items")
+      .select("*")
+      .eq("sale_id", s.id)
+      .order("created_at", { ascending: true });
+    setReceiptData(buildReceiptData(s, saleItems || [], { mpesaReceipt: null }));
+  };
 
   return (
     <div className="space-y-6">
@@ -1016,20 +1131,7 @@ export default function Sales() {
                         <Badge className="text-[10px] bg-success">+KSh {s.profit.toLocaleString()}</Badge>
                       </div>
                     </div>
-                    <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setReceiptData({
-                      id: s.id,
-                      customerName: s.customer_name || "Walk-in",
-                      productName: s.product_name,
-                      quantity: s.quantity,
-                      sellingPrice: s.selling_price,
-                      totalAmount: s.total_amount,
-                      discountAmount: s.discount_amount,
-                      finalAmount: s.final_amount,
-                      paymentMode: s.payment_mode,
-                      profit: s.profit,
-                      loyaltyPoints: Math.floor(s.final_amount / 100),
-                      date: s.date,
-                    })}>
+                    <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => printSaleReceipt(s)}>
                       <Printer className="h-4 w-4" />
                     </Button>
                   </div>
