@@ -253,7 +253,7 @@ export default function Sales() {
 
   const retryStk = async () => {
     if (!stkPending) return;
-    await sendStkPush(stkPending.saleId, mpesaPhone, finalAmount);
+    await sendStkPush(stkPending.saleId, mpesaPhone || stkPending.phone || "", finalAmount || stkPending.amount || 0);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
