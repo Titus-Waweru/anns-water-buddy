@@ -1157,6 +1157,11 @@ export default function Sales() {
                       <p className="font-bold text-foreground">KSh {s.final_amount.toLocaleString()}</p>
                       <div className="flex gap-1 justify-end flex-wrap">
                         <Badge variant="outline" className="text-[10px]">{s.payment_mode}</Badge>
+                        {manualCodes[s.id] && (
+                          <Badge variant="outline" className="text-[10px] font-mono border-primary/40 text-primary">
+                            {manualCodes[s.id]}
+                          </Badge>
+                        )}
                         {s.payment_status && s.payment_status !== "PAID" && (
                           <Badge variant={s.payment_status === "PENDING" ? "secondary" : "destructive"} className="text-[10px]">
                             {s.payment_status}
