@@ -560,6 +560,10 @@ export default function Sales() {
 
   const refreshStatusNow = async () => {
     if (!stkPending || isCheckingNow) return;
+    if (!stkPending.messageRef) {
+      toast.info("No bank reference for this attempt — retry the STK push or enter the M-Pesa code manually.");
+      return;
+    }
     setIsCheckingNow(true);
     try {
       const data = await queryStatus(stkPending.messageRef);
@@ -598,14 +602,15 @@ export default function Sales() {
     setStkStatus("idle");
     setManualForm({
       customerName: selectedCustomer?.name || "Walk-in",
-      phone: mpesaPhone || "",
-      amount: finalAmount || Number(stkPending ? 0 : 0),
+      phone: mpesaPhone || stkPending?.phone || "",
+      amount: finalAmount || stkPending?.amount || 0,
       mpesaCode: "",
       paymentTime: new Date().toISOString().slice(0, 16),
       notes: "",
     });
     setManualMode(true);
   };
+
 
   const submitManualPayment = async () => {
     if (!stkPending) {
