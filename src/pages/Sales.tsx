@@ -42,7 +42,8 @@ export default function Sales() {
   const [paymentSuccess, setPaymentSuccess] = useState<PaymentSuccessData | null>(null);
   const [pendingReceipt, setPendingReceipt] = useState<any>(null);
   const [mpesaPhone, setMpesaPhone] = useState("");
-  const [stkPending, setStkPending] = useState<{ saleId: string; messageRef: string; startedAt: number } | null>(null);
+  const [stkPending, setStkPending] = useState<{ saleId: string; messageRef: string; startedAt: number; amount?: number; phone?: string } | null>(null);
+  const [manualCodes, setManualCodes] = useState<Record<string, string>>({});
   const [stkStatus, setStkStatus] = useState<"idle" | "sending" | "waiting" | "still_processing" | "failed" | "cancelled">("idle");
   const [isCheckingNow, setIsCheckingNow] = useState(false);
   const [stkElapsed, setStkElapsed] = useState(0);
