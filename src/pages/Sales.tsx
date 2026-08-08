@@ -629,14 +629,15 @@ export default function Sales() {
     setManualSubmitting(true);
     try {
       const paymentTimeIso = new Date(manualForm.paymentTime).toISOString();
+      const saleId = stkPending.saleId;
       const { error } = await (supabase as any).rpc("record_manual_mpesa_payment", {
-        p_sale_id: stkPending.saleId,
+        p_sale_id: saleId,
         p_mpesa_receipt: code,
         p_phone_number: manualForm.phone.trim(),
         p_amount: Number(manualForm.amount),
         p_payment_time: paymentTimeIso,
         p_notes: manualForm.notes || null,
-        p_message_reference: stkPending.messageRef,
+        p_message_reference: stkPending.messageRef || null,
         p_branch_id: effectiveBranchId,
       });
 
@@ -646,6 +647,8 @@ export default function Sales() {
       }
 
       if (pollRef.current) window.clearInterval(pollRef.current);
+      // Build the printable receipt from the now-settled sale.
+      try { await showStkReceipt(saleId, code); } catch (e) { console.warn("receipt build failed", e); }
       await refetch();
       setPaymentSuccess({
         amount: Number(manualForm.amount),
@@ -662,6 +665,7 @@ export default function Sales() {
       setCartItems([]);
       setMpesaPhone("");
       setOpen(false);
+
     } finally {
       setManualSubmitting(false);
     }
