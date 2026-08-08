@@ -42,7 +42,8 @@ export default function Sales() {
   const [paymentSuccess, setPaymentSuccess] = useState<PaymentSuccessData | null>(null);
   const [pendingReceipt, setPendingReceipt] = useState<any>(null);
   const [mpesaPhone, setMpesaPhone] = useState("");
-  const [stkPending, setStkPending] = useState<{ saleId: string; messageRef: string; startedAt: number } | null>(null);
+  const [stkPending, setStkPending] = useState<{ saleId: string; messageRef: string; startedAt: number; amount?: number; phone?: string } | null>(null);
+  const [manualCodes, setManualCodes] = useState<Record<string, string>>({});
   const [stkStatus, setStkStatus] = useState<"idle" | "sending" | "waiting" | "still_processing" | "failed" | "cancelled">("idle");
   const [isCheckingNow, setIsCheckingNow] = useState(false);
   const [stkElapsed, setStkElapsed] = useState(0);
@@ -145,6 +146,27 @@ export default function Sales() {
     ? totalExpectedProfit - Math.min(subtotal, discountAmount)
     : (selectedProduct ? (selectedProduct.selling_price - selectedProduct.buying_price) * form.quantity : 0) - Math.min(subtotal, discountAmount);
 
+  // Manual M-Pesa / bank codes for the listed sales, so the cashier can see the
+  // reference that settled each manually-entered payment.
+  useEffect(() => {
+    const ids = sales.slice(0, 100).map(s => s.id);
+    if (ids.length === 0) { setManualCodes({}); return; }
+    let cancelled = false;
+    (supabase as any)
+      .from("payments")
+      .select("sale_id, mpesa_receipt")
+      .in("sale_id", ids)
+      .eq("payment_method", "MPESA_MANUAL")
+      .eq("status", "SUCCESS")
+      .then(({ data }: any) => {
+        if (cancelled || !data) return;
+        const map: Record<string, string> = {};
+        for (const row of data) if (row.sale_id && row.mpesa_receipt) map[row.sale_id] = row.mpesa_receipt;
+        setManualCodes(map);
+      });
+    return () => { cancelled = true; };
+  }, [sales]);
+
   const queryStatus = async (messageRef: string) => {
     const { data } = await supabase.functions.invoke("mpesa-transaction-status", {
       body: { message_reference: messageRef },
@@ -209,29 +231,32 @@ export default function Sales() {
           data.message || "Payment provider authorization pending. Please retry later.",
           { description: data.correlation_id ? `Ref: ${data.correlation_id}` : undefined },
         );
-        if (data.message_reference) {
-          setStkPending({ saleId, messageRef: data.message_reference, startedAt: Date.now() });
-        }
+        // Always keep the sale in context so the cashier can retry or enter the
+        // M-Pesa/bank code manually — even when the bank never issued a reference.
+        setStkPending({ saleId, messageRef: data.message_reference || "", startedAt: Date.now(), amount, phone });
         return;
       }
 
       if (error || data?.ok === false || !data?.message_reference) {
         setStkStatus("failed");
         toast.error(
-          data?.message || data?.error || error?.message || "STK push failed. Please retry.",
+          data?.message || data?.error || error?.message || "STK push failed. You can enter the M-Pesa code manually.",
         );
+        setStkPending({ saleId, messageRef: data?.message_reference || "", startedAt: Date.now(), amount, phone });
         return;
       }
 
-      setStkPending({ saleId, messageRef: data.message_reference, startedAt: Date.now() });
+      setStkPending({ saleId, messageRef: data.message_reference, startedAt: Date.now(), amount, phone });
       setStkStatus("waiting");
       toast.success("STK sent — waiting for customer to enter M-Pesa PIN…");
     } catch (e: any) {
       console.error("sendStkPush error:", e);
       setStkStatus("failed");
-      toast.error("Payment provider unreachable. Please retry later.");
+      toast.error("Payment provider unreachable. You can enter the M-Pesa code manually.");
+      setStkPending({ saleId, messageRef: "", startedAt: Date.now(), amount, phone });
     }
   };
+
 
   const cancelStk = async () => {
     if (!stkPending || isCancelling) return;
@@ -249,7 +274,7 @@ export default function Sales() {
 
   const retryStk = async () => {
     if (!stkPending) return;
-    await sendStkPush(stkPending.saleId, mpesaPhone, finalAmount);
+    await sendStkPush(stkPending.saleId, mpesaPhone || stkPending.phone || "", finalAmount || stkPending.amount || 0);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -556,6 +581,10 @@ export default function Sales() {
 
   const refreshStatusNow = async () => {
     if (!stkPending || isCheckingNow) return;
+    if (!stkPending.messageRef) {
+      toast.info("No bank reference for this attempt — retry the STK push or enter the M-Pesa code manually.");
+      return;
+    }
     setIsCheckingNow(true);
     try {
       const data = await queryStatus(stkPending.messageRef);
@@ -594,14 +623,15 @@ export default function Sales() {
     setStkStatus("idle");
     setManualForm({
       customerName: selectedCustomer?.name || "Walk-in",
-      phone: mpesaPhone || "",
-      amount: finalAmount || Number(stkPending ? 0 : 0),
+      phone: mpesaPhone || stkPending?.phone || "",
+      amount: finalAmount || stkPending?.amount || 0,
       mpesaCode: "",
       paymentTime: new Date().toISOString().slice(0, 16),
       notes: "",
     });
     setManualMode(true);
   };
+
 
   const submitManualPayment = async () => {
     if (!stkPending) {
@@ -620,14 +650,15 @@ export default function Sales() {
     setManualSubmitting(true);
     try {
       const paymentTimeIso = new Date(manualForm.paymentTime).toISOString();
+      const saleId = stkPending.saleId;
       const { error } = await (supabase as any).rpc("record_manual_mpesa_payment", {
-        p_sale_id: stkPending.saleId,
+        p_sale_id: saleId,
         p_mpesa_receipt: code,
         p_phone_number: manualForm.phone.trim(),
         p_amount: Number(manualForm.amount),
         p_payment_time: paymentTimeIso,
         p_notes: manualForm.notes || null,
-        p_message_reference: stkPending.messageRef,
+        p_message_reference: stkPending.messageRef || null,
         p_branch_id: effectiveBranchId,
       });
 
@@ -637,6 +668,8 @@ export default function Sales() {
       }
 
       if (pollRef.current) window.clearInterval(pollRef.current);
+      // Build the printable receipt from the now-settled sale.
+      try { await showStkReceipt(saleId, code); } catch (e) { console.warn("receipt build failed", e); }
       await refetch();
       setPaymentSuccess({
         amount: Number(manualForm.amount),
@@ -653,6 +686,7 @@ export default function Sales() {
       setCartItems([]);
       setMpesaPhone("");
       setOpen(false);
+
     } finally {
       setManualSubmitting(false);
     }
@@ -1123,6 +1157,11 @@ export default function Sales() {
                       <p className="font-bold text-foreground">KSh {s.final_amount.toLocaleString()}</p>
                       <div className="flex gap-1 justify-end flex-wrap">
                         <Badge variant="outline" className="text-[10px]">{s.payment_mode}</Badge>
+                        {manualCodes[s.id] && (
+                          <Badge variant="outline" className="text-[10px] font-mono border-primary/40 text-primary">
+                            {manualCodes[s.id]}
+                          </Badge>
+                        )}
                         {s.payment_status && s.payment_status !== "PAID" && (
                           <Badge variant={s.payment_status === "PENDING" ? "secondary" : "destructive"} className="text-[10px]">
                             {s.payment_status}
