@@ -210,29 +210,32 @@ export default function Sales() {
           data.message || "Payment provider authorization pending. Please retry later.",
           { description: data.correlation_id ? `Ref: ${data.correlation_id}` : undefined },
         );
-        if (data.message_reference) {
-          setStkPending({ saleId, messageRef: data.message_reference, startedAt: Date.now() });
-        }
+        // Always keep the sale in context so the cashier can retry or enter the
+        // M-Pesa/bank code manually — even when the bank never issued a reference.
+        setStkPending({ saleId, messageRef: data.message_reference || "", startedAt: Date.now(), amount, phone });
         return;
       }
 
       if (error || data?.ok === false || !data?.message_reference) {
         setStkStatus("failed");
         toast.error(
-          data?.message || data?.error || error?.message || "STK push failed. Please retry.",
+          data?.message || data?.error || error?.message || "STK push failed. You can enter the M-Pesa code manually.",
         );
+        setStkPending({ saleId, messageRef: data?.message_reference || "", startedAt: Date.now(), amount, phone });
         return;
       }
 
-      setStkPending({ saleId, messageRef: data.message_reference, startedAt: Date.now() });
+      setStkPending({ saleId, messageRef: data.message_reference, startedAt: Date.now(), amount, phone });
       setStkStatus("waiting");
       toast.success("STK sent — waiting for customer to enter M-Pesa PIN…");
     } catch (e: any) {
       console.error("sendStkPush error:", e);
       setStkStatus("failed");
-      toast.error("Payment provider unreachable. Please retry later.");
+      toast.error("Payment provider unreachable. You can enter the M-Pesa code manually.");
+      setStkPending({ saleId, messageRef: "", startedAt: Date.now(), amount, phone });
     }
   };
+
 
   const cancelStk = async () => {
     if (!stkPending || isCancelling) return;
