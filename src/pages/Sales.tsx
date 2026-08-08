@@ -146,6 +146,27 @@ export default function Sales() {
     ? totalExpectedProfit - Math.min(subtotal, discountAmount)
     : (selectedProduct ? (selectedProduct.selling_price - selectedProduct.buying_price) * form.quantity : 0) - Math.min(subtotal, discountAmount);
 
+  // Manual M-Pesa / bank codes for the listed sales, so the cashier can see the
+  // reference that settled each manually-entered payment.
+  useEffect(() => {
+    const ids = sales.slice(0, 100).map(s => s.id);
+    if (ids.length === 0) { setManualCodes({}); return; }
+    let cancelled = false;
+    (supabase as any)
+      .from("payments")
+      .select("sale_id, mpesa_receipt")
+      .in("sale_id", ids)
+      .eq("payment_method", "MPESA_MANUAL")
+      .eq("status", "SUCCESS")
+      .then(({ data }: any) => {
+        if (cancelled || !data) return;
+        const map: Record<string, string> = {};
+        for (const row of data) if (row.sale_id && row.mpesa_receipt) map[row.sale_id] = row.mpesa_receipt;
+        setManualCodes(map);
+      });
+    return () => { cancelled = true; };
+  }, [sales]);
+
   const queryStatus = async (messageRef: string) => {
     const { data } = await supabase.functions.invoke("mpesa-transaction-status", {
       body: { message_reference: messageRef },
